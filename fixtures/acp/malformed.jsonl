@@ -1,0 +1,2 @@
+{"sequence":1,"direction":"client_to_agent","frame":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}}
+{"sequence":2,"direction":"agent_to_client","raw":"{\"jsonrpc\":\"2.0\",\"method\":\"session/update\",\"params\":}","validJson":false}

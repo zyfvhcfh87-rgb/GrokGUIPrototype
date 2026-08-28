@@ -1,0 +1,3 @@
+{"sequence":1,"stream":"stderr","text":"fake-acp-agent: sanitized diagnostic fixture\n"}
+{"sequence":2,"direction":"client_to_agent","frame":{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":1}}}
+{"sequence":3,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","id":1,"result":{"protocolVersion":1}}}

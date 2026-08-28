@@ -1,0 +1,10 @@
+/target/
+/artifacts/phase-0/live/
+*.debug.log
+*.local.json
+.env
+.env.*
+!.env.example
+node_modules/
+dist/
+

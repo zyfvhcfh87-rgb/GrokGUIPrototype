@@ -1,0 +1,23 @@
+[workspace]
+members = [
+  "crates/grok-runtime",
+  "tools/grok-acp-probe",
+  "tools/fake-acp-agent",
+]
+resolver = "3"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.88.0"
+
+[workspace.dependencies]
+agent-client-protocol = { version = "=2.0.0", features = ["unstable_auth_methods", "unstable_elicitation"] }
+clap = { version = "4.5.46", features = ["derive"] }
+grok-runtime = { path = "crates/grok-runtime" }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.143"
+tempfile = "3.21.0"
+thiserror = "2.0.16"
+tokio = { version = "1.47.1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
+tracing = "0.1.41"
+
