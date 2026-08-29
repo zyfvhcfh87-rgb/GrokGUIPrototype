@@ -29,7 +29,6 @@
 {"sequence":29,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Replayed sanitized agent response."},"messageId":"message-replay-agent-001"}}}}
 {"sequence":30,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","id":7,"result":{}}}
 {"sequence":31,"direction":"client_to_agent","frame":{"jsonrpc":"2.0","id":8,"method":"session/resume","params":{"sessionId":"session-001","cwd":"C:\\fixture-workspace","mcpServers":[]}}}
-{"sequence":32,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","method":"session/update","params":{"sessionId":"session-001","update":{"sessionUpdate":"agent_message_chunk","content":{"type":"text","text":"Replayed sanitized session context."},"messageId":"message-replay-001"}}}}
-{"sequence":33,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","id":8,"result":{}}}
-{"sequence":34,"direction":"client_to_agent","frame":{"jsonrpc":"2.0","id":9,"method":"session/close","params":{"sessionId":"session-001"}}}
-{"sequence":35,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","id":9,"result":{}}}
+{"sequence":32,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","id":8,"result":{}}}
+{"sequence":33,"direction":"client_to_agent","frame":{"jsonrpc":"2.0","id":9,"method":"session/close","params":{"sessionId":"session-001"}}}
+{"sequence":34,"direction":"agent_to_client","frame":{"jsonrpc":"2.0","id":9,"result":{}}}

@@ -1,0 +1,2063 @@
+{
+    "schemaVersion":  2,
+    "runtimeVersion":  "1.0.5 (5115b46bc9)",
+    "probe":  "authenticated_lifecycle_prompt_load_resume_close",
+    "privacy":  "Bounded ordered field paths and stderr byte counts only; fieldPathsTruncated marks shape caps, request IDs are remapped, and scalar payload values and raw stderr text are discarded.",
+    "observations":  {
+                         "prompt":  "confirmed",
+                         "list":  "confirmed",
+                         "load":  "confirmed",
+                         "resume":  "confirmed",
+                         "close":  "confirmed"
+                     },
+    "wire":  {
+                 "clientMethods":  [
+                                       "authenticate",
+                                       "initialize",
+                                       "session/close",
+                                       "session/list",
+                                       "session/load",
+                                       "session/new",
+                                       "session/prompt",
+                                       "session/resume"
+                                   ],
+                 "agentMethods":  [
+                                      "_x.ai/announcements/update",
+                                      "_x.ai/mcp/init_progress",
+                                      "_x.ai/mcp/server_status",
+                                      "_x.ai/mcp/servers_updated",
+                                      "_x.ai/mcp_initialized",
+                                      "_x.ai/models/update",
+                                      "_x.ai/queue/changed",
+                                      "_x.ai/session/prompt_complete",
+                                      "_x.ai/session/update",
+                                      "_x.ai/session_notification",
+                                      "_x.ai/sessions/changed",
+                                      "_x.ai/settings/update",
+                                      "session/update"
+                                  ],
+                 "clientResponseCount":  0,
+                 "agentResponseCount":  8,
+                 "malformedStdoutLines":  0,
+                 "stderrLineCount":  5,
+                 "stderrByteCount":  665,
+                 "droppedFrameCount":  0,
+                 "frames":  [
+                                {
+                                    "sequence":  1,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0001",
+                                    "method":  "initialize",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.clientCapabilities",
+                                                       "params.clientCapabilities.auth",
+                                                       "params.clientCapabilities.auth.terminal",
+                                                       "params.clientCapabilities.elicitation",
+                                                       "params.clientCapabilities.elicitation.form",
+                                                       "params.clientCapabilities.elicitation.url",
+                                                       "params.clientCapabilities.fs",
+                                                       "params.clientCapabilities.fs.readTextFile",
+                                                       "params.clientCapabilities.fs.writeTextFile",
+                                                       "params.clientCapabilities.terminal",
+                                                       "params.protocolVersion"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  2,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0001",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.agentId",
+                                                       "result._meta.agentInstanceId",
+                                                       "result._meta.agentVersion",
+                                                       "result._meta.availableCommands",
+                                                       "result._meta.availableCommands[]",
+                                                       "result._meta.availableCommands[].description",
+                                                       "result._meta.availableCommands[].input",
+                                                       "result._meta.availableCommands[].input.hint",
+                                                       "result._meta.availableCommands[].name",
+                                                       "result._meta.cancelRewind",
+                                                       "result._meta.currentWorkingDirectory",
+                                                       "result._meta.defaultAuthMethodId",
+                                                       "result._meta.grokShell",
+                                                       "result._meta.hostname",
+                                                       "result._meta.mcpApps",
+                                                       "result._meta.mcpServers",
+                                                       "result._meta.mcpServers[]",
+                                                       "result._meta.metadata",
+                                                       "result._meta.modelState",
+                                                       "result._meta.modelState.availableModels",
+                                                       "result._meta.modelState.availableModels[]",
+                                                       "result._meta.modelState.availableModels[]._meta",
+                                                       "result._meta.modelState.availableModels[]._meta.agentType",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEffort",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts[]",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "result._meta.modelState.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "result._meta.modelState.availableModels[]._meta.supportsReasoningEffort",
+                                                       "result._meta.modelState.availableModels[]._meta.totalContextTokens",
+                                                       "result._meta.modelState.availableModels[].description",
+                                                       "result._meta.modelState.availableModels[].modelId",
+                                                       "result._meta.modelState.availableModels[].name",
+                                                       "result._meta.modelState.currentModelId",
+                                                       "result._meta.sessionRecap",
+                                                       "result._meta.voiceMode",
+                                                       "result._meta.x.ai/mcp/sdk",
+                                                       "result._meta.x.ai/pluginDirs",
+                                                       "result.agentCapabilities",
+                                                       "result.agentCapabilities._meta",
+                                                       "result.agentCapabilities._meta.x.ai/capabilities",
+                                                       "result.agentCapabilities._meta.x.ai/capabilities.toolOverrides",
+                                                       "result.agentCapabilities._meta.x.ai/capabilities.toolOverrides.x_keyword_search",
+                                                       "result.agentCapabilities._meta.x.ai/capabilities.toolOverrides.x_semantic_search",
+                                                       "result.agentCapabilities._meta.x.ai/capabilities.toolOverrides.x_thread_fetch",
+                                                       "result.agentCapabilities._meta.x.ai/capabilities.toolOverrides.x_user_search",
+                                                       "result.agentCapabilities._meta.x.ai/fs_notify",
+                                                       "result.agentCapabilities._meta.x.ai/hooks",
+                                                       "result.agentCapabilities._meta.x.ai/hooks.blockingEvents",
+                                                       "result.agentCapabilities._meta.x.ai/hooks.blockingEvents[]",
+                                                       "result.agentCapabilities._meta.x.ai/hooks.decisions",
+                                                       "result.agentCapabilities._meta.x.ai/hooks.decisions[]",
+                                                       "result.agentCapabilities._meta.x.ai/hooks.stopSignals",
+                                                       "result.agentCapabilities._meta.x.ai/hooks.stopSignals[]",
+                                                       "result.agentCapabilities.auth",
+                                                       "result.agentCapabilities.loadSession",
+                                                       "result.agentCapabilities.mcpCapabilities",
+                                                       "result.agentCapabilities.mcpCapabilities.http",
+                                                       "result.agentCapabilities.mcpCapabilities.sse"
+                                                   ],
+                                    "fieldPathsTruncated":  true
+                                },
+                                {
+                                    "sequence":  3,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0002",
+                                    "method":  "authenticate",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.methodId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  4,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0002",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.\u003cunknown-key\u003e"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  5,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0003",
+                                    "method":  "session/new",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.cwd",
+                                                       "params.mcpServers",
+                                                       "params.mcpServers[]"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  6,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/servers_updated",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.mcpServers",
+                                                       "params.mcpServers[]",
+                                                       "params.mcpServers[].\u003cunknown-key\u003e",
+                                                       "params.mcpServers[].name",
+                                                       "params.mcpServers[].type",
+                                                       "params.mcpServers[].url"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  7,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/models/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.availableModels",
+                                                       "params.availableModels[]",
+                                                       "params.availableModels[]._meta",
+                                                       "params.availableModels[]._meta.agentType",
+                                                       "params.availableModels[]._meta.reasoningEffort",
+                                                       "params.availableModels[]._meta.reasoningEfforts",
+                                                       "params.availableModels[]._meta.reasoningEfforts[]",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "params.availableModels[]._meta.supportsReasoningEffort",
+                                                       "params.availableModels[]._meta.totalContextTokens",
+                                                       "params.availableModels[].description",
+                                                       "params.availableModels[].modelId",
+                                                       "params.availableModels[].name",
+                                                       "params.currentModelId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  8,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/models/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.availableModels",
+                                                       "params.availableModels[]",
+                                                       "params.availableModels[]._meta",
+                                                       "params.availableModels[]._meta.agentType",
+                                                       "params.availableModels[]._meta.reasoningEffort",
+                                                       "params.availableModels[]._meta.reasoningEfforts",
+                                                       "params.availableModels[]._meta.reasoningEfforts[]",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "params.availableModels[]._meta.supportsReasoningEffort",
+                                                       "params.availableModels[]._meta.totalContextTokens",
+                                                       "params.availableModels[].description",
+                                                       "params.availableModels[].modelId",
+                                                       "params.availableModels[].name",
+                                                       "params.currentModelId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  9,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/settings/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.allow_access",
+                                                       "params.auto_permission_mode_enabled",
+                                                       "params.permission_mode"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  10,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/announcements/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  11,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  12,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands",
+                                                       "params.update.availableCommands[]",
+                                                       "params.update.availableCommands[]._meta",
+                                                       "params.update.availableCommands[]._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands[]._meta.path",
+                                                       "params.update.availableCommands[].description",
+                                                       "params.update.availableCommands[].input",
+                                                       "params.update.availableCommands[].input.hint",
+                                                       "params.update.availableCommands[].name",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  13,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands",
+                                                       "params.update.availableCommands[]",
+                                                       "params.update.availableCommands[]._meta",
+                                                       "params.update.availableCommands[]._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands[]._meta.path",
+                                                       "params.update.availableCommands[].description",
+                                                       "params.update.availableCommands[].input",
+                                                       "params.update.availableCommands[].input.hint",
+                                                       "params.update.availableCommands[].name",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  14,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  15,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0003",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.\u003cunknown-key\u003e",
+                                                       "result._meta.currentWorkingDirectory",
+                                                       "result._meta.x.ai/sessionConfig",
+                                                       "result._meta.x.ai/sessionConfig.options",
+                                                       "result._meta.x.ai/sessionConfig.options[]",
+                                                       "result._meta.x.ai/sessionConfig.options[].\u003cunknown-key\u003e",
+                                                       "result._meta.x.ai/sessionConfig.options[].category",
+                                                       "result._meta.x.ai/sessionConfig.options[].description",
+                                                       "result._meta.x.ai/sessionConfig.options[].id",
+                                                       "result._meta.x.ai/sessionConfig.options[].label",
+                                                       "result.models",
+                                                       "result.models.availableModels",
+                                                       "result.models.availableModels[]",
+                                                       "result.models.availableModels[]._meta",
+                                                       "result.models.availableModels[]._meta.agentType",
+                                                       "result.models.availableModels[]._meta.reasoningEffort",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[]",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "result.models.availableModels[]._meta.supportsReasoningEffort",
+                                                       "result.models.availableModels[]._meta.totalContextTokens",
+                                                       "result.models.availableModels[].description",
+                                                       "result.models.availableModels[].modelId",
+                                                       "result.models.availableModels[].name",
+                                                       "result.models.currentModelId",
+                                                       "result.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  16,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0004",
+                                    "method":  "session/prompt",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.prompt",
+                                                       "params.prompt[]",
+                                                       "params.prompt[].text",
+                                                       "params.prompt[].type",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  17,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/sessions/changed",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.removed",
+                                                       "params.removed[]",
+                                                       "params.upserted",
+                                                       "params.upserted[]",
+                                                       "params.upserted[].\u003cunknown-key\u003e",
+                                                       "params.upserted[].cwd",
+                                                       "params.upserted[].modelId",
+                                                       "params.upserted[].reasoningEffort",
+                                                       "params.upserted[].sessionId",
+                                                       "params.upserted[].title"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  18,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/queue/changed",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.entries",
+                                                       "params.entries[]",
+                                                       "params.entries[].\u003cunknown-key\u003e",
+                                                       "params.entries[].id",
+                                                       "params.entries[].kind",
+                                                       "params.entries[].text",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  19,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/queue/changed",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.entries",
+                                                       "params.entries[]",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  20,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update._meta.modelId",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  21,
+                                    "direction":  "agent_diagnostic",
+                                    "kind":  "diagnostic",
+                                    "byteCount":  133
+                                },
+                                {
+                                    "sequence":  22,
+                                    "direction":  "agent_diagnostic",
+                                    "kind":  "diagnostic",
+                                    "byteCount":  133
+                                },
+                                {
+                                    "sequence":  23,
+                                    "direction":  "agent_diagnostic",
+                                    "kind":  "diagnostic",
+                                    "byteCount":  133
+                                },
+                                {
+                                    "sequence":  24,
+                                    "direction":  "agent_diagnostic",
+                                    "kind":  "diagnostic",
+                                    "byteCount":  133
+                                },
+                                {
+                                    "sequence":  25,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  26,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  27,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  28,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  29,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  30,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  31,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  32,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  33,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  34,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  35,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/announcements/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  36,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  37,
+                                    "direction":  "agent_diagnostic",
+                                    "kind":  "diagnostic",
+                                    "byteCount":  133
+                                },
+                                {
+                                    "sequence":  38,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/models/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.availableModels",
+                                                       "params.availableModels[]",
+                                                       "params.availableModels[]._meta",
+                                                       "params.availableModels[]._meta.agentType",
+                                                       "params.availableModels[]._meta.reasoningEffort",
+                                                       "params.availableModels[]._meta.reasoningEfforts",
+                                                       "params.availableModels[]._meta.reasoningEfforts[]",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "params.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "params.availableModels[]._meta.supportsReasoningEffort",
+                                                       "params.availableModels[]._meta.totalContextTokens",
+                                                       "params.availableModels[].description",
+                                                       "params.availableModels[].modelId",
+                                                       "params.availableModels[].name",
+                                                       "params.currentModelId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  39,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  40,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  41,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/init_progress",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  42,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp_initialized",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  43,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/mcp/server_status",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.name",
+                                                       "params.sessionId",
+                                                       "params.status"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  44,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  45,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  46,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  47,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  48,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  49,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  50,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  51,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  52,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  53,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  54,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  55,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  56,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  57,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  58,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  59,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  60,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  61,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  62,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  63,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  64,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  65,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  66,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  67,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  68,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  69,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  70,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  71,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  72,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  73,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  74,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  75,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  76,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  77,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  78,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  79,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  80,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  81,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  82,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  83,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  84,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  85,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  86,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  87,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  88,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  89,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  90,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  91,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  92,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands",
+                                                       "params.update.availableCommands[]",
+                                                       "params.update.availableCommands[]._meta",
+                                                       "params.update.availableCommands[]._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands[]._meta.path",
+                                                       "params.update.availableCommands[].description",
+                                                       "params.update.availableCommands[].input",
+                                                       "params.update.availableCommands[].input.hint",
+                                                       "params.update.availableCommands[].name",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  93,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  94,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  95,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/queue/changed",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.entries",
+                                                       "params.entries[]",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  96,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  97,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session/prompt_complete",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.stopReason"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  98,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/sessions/changed",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.removed",
+                                                       "params.removed[]",
+                                                       "params.upserted",
+                                                       "params.upserted[]",
+                                                       "params.upserted[].\u003cunknown-key\u003e",
+                                                       "params.upserted[].cwd",
+                                                       "params.upserted[].modelId",
+                                                       "params.upserted[].reasoningEffort",
+                                                       "params.upserted[].sessionId",
+                                                       "params.upserted[].title"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  99,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0004",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.\u003cunknown-key\u003e",
+                                                       "result._meta.modelId",
+                                                       "result._meta.sessionId",
+                                                       "result.stopReason"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  100,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0005",
+                                    "method":  "session/list",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.cwd"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  101,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0005",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.\u003cunknown-key\u003e",
+                                                       "result.sessions",
+                                                       "result.sessions[]",
+                                                       "result.sessions[]._meta",
+                                                       "result.sessions[]._meta.\u003cunknown-key\u003e",
+                                                       "result.sessions[].cwd",
+                                                       "result.sessions[].sessionId",
+                                                       "result.sessions[].title",
+                                                       "result.sessions[].updatedAt"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  102,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0006",
+                                    "method":  "session/load",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.cwd",
+                                                       "params.mcpServers",
+                                                       "params.mcpServers[]",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  103,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  104,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  105,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update._meta.modelId",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  106,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  107,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  108,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.content",
+                                                       "params.update.content.text",
+                                                       "params.update.content.type",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  109,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  110,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.model_id",
+                                                       "params.update.reasoning_effort",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  111,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0006",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.\u003cunknown-key\u003e",
+                                                       "result._meta.sessionId",
+                                                       "result._meta.x.ai/sessionConfig",
+                                                       "result._meta.x.ai/sessionConfig.options",
+                                                       "result._meta.x.ai/sessionConfig.options[]",
+                                                       "result._meta.x.ai/sessionConfig.options[].\u003cunknown-key\u003e",
+                                                       "result._meta.x.ai/sessionConfig.options[].category",
+                                                       "result._meta.x.ai/sessionConfig.options[].description",
+                                                       "result._meta.x.ai/sessionConfig.options[].id",
+                                                       "result._meta.x.ai/sessionConfig.options[].label",
+                                                       "result.models",
+                                                       "result.models.availableModels",
+                                                       "result.models.availableModels[]",
+                                                       "result.models.availableModels[]._meta",
+                                                       "result.models.availableModels[]._meta.agentType",
+                                                       "result.models.availableModels[]._meta.reasoningEffort",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[]",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "result.models.availableModels[]._meta.supportsReasoningEffort",
+                                                       "result.models.availableModels[]._meta.totalContextTokens",
+                                                       "result.models.availableModels[].description",
+                                                       "result.models.availableModels[].modelId",
+                                                       "result.models.availableModels[].name",
+                                                       "result.models.currentModelId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  112,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0007",
+                                    "method":  "session/resume",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.cwd",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  113,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands",
+                                                       "params.update.availableCommands[]",
+                                                       "params.update.availableCommands[]._meta",
+                                                       "params.update.availableCommands[]._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands[]._meta.path",
+                                                       "params.update.availableCommands[].description",
+                                                       "params.update.availableCommands[].input",
+                                                       "params.update.availableCommands[].input.hint",
+                                                       "params.update.availableCommands[].name",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  114,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.model_id",
+                                                       "params.update.reasoning_effort",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  115,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0007",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.\u003cunknown-key\u003e",
+                                                       "result._meta.sessionId",
+                                                       "result._meta.x.ai/sessionConfig",
+                                                       "result._meta.x.ai/sessionConfig.options",
+                                                       "result._meta.x.ai/sessionConfig.options[]",
+                                                       "result._meta.x.ai/sessionConfig.options[].\u003cunknown-key\u003e",
+                                                       "result._meta.x.ai/sessionConfig.options[].category",
+                                                       "result._meta.x.ai/sessionConfig.options[].description",
+                                                       "result._meta.x.ai/sessionConfig.options[].id",
+                                                       "result._meta.x.ai/sessionConfig.options[].label",
+                                                       "result.models",
+                                                       "result.models.availableModels",
+                                                       "result.models.availableModels[]",
+                                                       "result.models.availableModels[]._meta",
+                                                       "result.models.availableModels[]._meta.agentType",
+                                                       "result.models.availableModels[]._meta.reasoningEffort",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[]",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].default",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].description",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].id",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].label",
+                                                       "result.models.availableModels[]._meta.reasoningEfforts[].value",
+                                                       "result.models.availableModels[]._meta.supportsReasoningEffort",
+                                                       "result.models.availableModels[]._meta.totalContextTokens",
+                                                       "result.models.availableModels[].description",
+                                                       "result.models.availableModels[].modelId",
+                                                       "result.models.availableModels[].name",
+                                                       "result.models.currentModelId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  116,
+                                    "direction":  "client_to_agent",
+                                    "kind":  "request",
+                                    "requestId":  "request-0008",
+                                    "method":  "session/close",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.sessionId"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  117,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/sessions/changed",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params.removed",
+                                                       "params.removed[]",
+                                                       "params.upserted",
+                                                       "params.upserted[]"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  118,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "session/update",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update._meta",
+                                                       "params.update._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands",
+                                                       "params.update.availableCommands[]",
+                                                       "params.update.availableCommands[]._meta",
+                                                       "params.update.availableCommands[]._meta.\u003cunknown-key\u003e",
+                                                       "params.update.availableCommands[]._meta.path",
+                                                       "params.update.availableCommands[].description",
+                                                       "params.update.availableCommands[].input",
+                                                       "params.update.availableCommands[].input.hint",
+                                                       "params.update.availableCommands[].name",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  119,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  120,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "notification",
+                                    "method":  "_x.ai/session_notification",
+                                    "fieldPaths":  [
+                                                       "params",
+                                                       "params._meta",
+                                                       "params._meta.\u003cunknown-key\u003e",
+                                                       "params.sessionId",
+                                                       "params.update",
+                                                       "params.update.\u003cunknown-key\u003e",
+                                                       "params.update.sessionUpdate"
+                                                   ]
+                                },
+                                {
+                                    "sequence":  121,
+                                    "direction":  "agent_to_client",
+                                    "kind":  "response",
+                                    "requestId":  "request-0008",
+                                    "fieldPaths":  [
+                                                       "result",
+                                                       "result._meta",
+                                                       "result._meta.x.ai/closeOutcome"
+                                                   ]
+                                }
+                            ]
+             }
+}

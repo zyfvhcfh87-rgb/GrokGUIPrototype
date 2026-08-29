@@ -1,0 +1,218 @@
+{
+    "fixtureKind":  "sanitized-selected-wire-shapes",
+    "runtime":  {
+                    "product":  "Grok Build",
+                    "version":  "1.0.5",
+                    "protocolVersion":  1
+                },
+    "scope":  "disposable zero-turn session-local control probe",
+    "extraction":  {
+                       "sequenceRenumbered":  true,
+                       "unrelatedFramesOmitted":  true,
+                       "payloadValuesRetained":  false,
+                       "requestIdsConsistentlyRemapped":  true
+                   },
+    "observations":  {
+                         "newSessionRequestedAdvertisedModelAndEffort":  true,
+                         "setModelAcceptedSameValues":  true,
+                         "setModelResponseConfirmedEffectiveModel":  true,
+                         "setModePlanAccepted":  true,
+                         "setModeDefaultAccepted":  true,
+                         "standardConfigOptionCount":  0,
+                         "promptSent":  false,
+                         "globalPermissionNotificationSent":  false,
+                         "sessionClosed":  true
+                     },
+    "frames":  [
+                   {
+                       "sequence":  1,
+                       "direction":  "client_to_agent",
+                       "kind":  "request",
+                       "requestId":  "request-0001",
+                       "method":  "session/new",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params._meta",
+                                          "params._meta.modelId",
+                                          "params._meta.reasoningEffort",
+                                          "params.cwd",
+                                          "params.mcpServers",
+                                          "params.mcpServers[]"
+                                      ]
+                   },
+                   {
+                       "sequence":  2,
+                       "direction":  "agent_to_client",
+                       "kind":  "notification",
+                       "method":  "_x.ai/session_notification",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.sessionId",
+                                          "params.update",
+                                          "params.update.model_id",
+                                          "params.update.reasoning_effort",
+                                          "params.update.sessionUpdate"
+                                      ]
+                   },
+                   {
+                       "sequence":  3,
+                       "direction":  "agent_to_client",
+                       "kind":  "response",
+                       "requestId":  "request-0001",
+                       "fieldPaths":  [
+                                          "result",
+                                          "result._meta",
+                                          "result._meta.x.ai/sessionConfig",
+                                          "result._meta.x.ai/sessionConfig.options",
+                                          "result.models",
+                                          "result.models.currentModelId",
+                                          "result.sessionId"
+                                      ]
+                   },
+                   {
+                       "sequence":  4,
+                       "direction":  "client_to_agent",
+                       "kind":  "request",
+                       "requestId":  "request-0002",
+                       "method":  "session/set_model",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params._meta",
+                                          "params._meta.reasoningEffort",
+                                          "params.modelId",
+                                          "params.sessionId"
+                                      ]
+                   },
+                   {
+                       "sequence":  5,
+                       "direction":  "agent_to_client",
+                       "kind":  "response",
+                       "requestId":  "request-0002",
+                       "fieldPaths":  [
+                                          "result",
+                                          "result._meta",
+                                          "result._meta.model",
+                                          "result._meta.model.Ok"
+                                      ]
+                   },
+                   {
+                       "sequence":  6,
+                       "direction":  "agent_to_client",
+                       "kind":  "notification",
+                       "method":  "_x.ai/session_notification",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.sessionId",
+                                          "params.update",
+                                          "params.update.model_id",
+                                          "params.update.reasoning_effort",
+                                          "params.update.sessionUpdate"
+                                      ]
+                   },
+                   {
+                       "sequence":  7,
+                       "direction":  "client_to_agent",
+                       "kind":  "request",
+                       "requestId":  "request-0003",
+                       "method":  "session/set_mode",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.modeId",
+                                          "params.sessionId"
+                                      ]
+                   },
+                   {
+                       "sequence":  8,
+                       "direction":  "agent_to_client",
+                       "kind":  "response",
+                       "requestId":  "request-0003",
+                       "fieldPaths":  [
+                                          "result"
+                                      ]
+                   },
+                   {
+                       "sequence":  9,
+                       "direction":  "agent_to_client",
+                       "kind":  "notification",
+                       "method":  "session/update",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.sessionId",
+                                          "params.update",
+                                          "params.update.currentModeId",
+                                          "params.update.sessionUpdate"
+                                      ]
+                   },
+                   {
+                       "sequence":  10,
+                       "direction":  "client_to_agent",
+                       "kind":  "request",
+                       "requestId":  "request-0004",
+                       "method":  "session/set_mode",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.modeId",
+                                          "params.sessionId"
+                                      ]
+                   },
+                   {
+                       "sequence":  11,
+                       "direction":  "agent_to_client",
+                       "kind":  "response",
+                       "requestId":  "request-0004",
+                       "fieldPaths":  [
+                                          "result"
+                                      ]
+                   },
+                   {
+                       "sequence":  12,
+                       "direction":  "agent_to_client",
+                       "kind":  "notification",
+                       "method":  "session/update",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.sessionId",
+                                          "params.update",
+                                          "params.update.currentModeId",
+                                          "params.update.sessionUpdate"
+                                      ]
+                   },
+                   {
+                       "sequence":  13,
+                       "direction":  "client_to_agent",
+                       "kind":  "request",
+                       "requestId":  "request-0005",
+                       "method":  "session/close",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.sessionId"
+                                      ]
+                   },
+                   {
+                       "sequence":  14,
+                       "direction":  "agent_to_client",
+                       "kind":  "notification",
+                       "method":  "_x.ai/sessions/changed",
+                       "fieldPaths":  [
+                                          "params",
+                                          "params.removed",
+                                          "params.removed[]",
+                                          "params.upserted",
+                                          "params.upserted[]"
+                                      ]
+                   },
+                   {
+                       "sequence":  15,
+                       "direction":  "agent_to_client",
+                       "kind":  "response",
+                       "requestId":  "request-0005",
+                       "fieldPaths":  [
+                                          "result",
+                                          "result._meta",
+                                          "result._meta.x.ai/closeOutcome"
+                                      ]
+                   }
+               ],
+    "schemaVersion":  2,
+    "privacy":  "Selected bounded ordered field paths only; fieldPathsTruncated marks shape caps, request IDs are remapped, and scalar payload values are discarded."
+}

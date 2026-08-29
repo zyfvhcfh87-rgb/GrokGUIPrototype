@@ -6,8 +6,14 @@ rust-version.workspace = true
 publish = false
 
 [dependencies]
+agent-client-protocol = { workspace = true }
 serde = { workspace = true }
+serde_json = { workspace = true }
 thiserror = { workspace = true }
 
-[dev-dependencies]
-serde_json = { workspace = true }
+[target.'cfg(windows)'.dependencies]
+futures = "0.3.31"
+process-wrap = { version = "=10.0.0", default-features = false, features = ["tokio1", "creation-flags", "job-object", "kill-on-drop"] }
+tokio = { workspace = true }
+tokio-util = { version = "0.7.16", features = ["codec", "compat"] }
+windows = { version = "=0.62.2", features = ["Win32_System_Threading"] }

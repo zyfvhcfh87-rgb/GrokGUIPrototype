@@ -8,8 +8,8 @@ use crate::RedactedDiagnostic;
 /// Application-facing events produced by a Grok runtime adapter.
 ///
 /// These are normalized presentation facts, not ACP envelopes. In particular,
-/// an unknown extension retains only its method name; its untrusted raw payload
-/// is never represented here.
+/// an unknown extension retains only a fixed observation marker; its untrusted
+/// raw method name and payload are never represented here.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEvent {
@@ -183,8 +183,9 @@ pub struct Usage {
 
 /// A bounded JSON-RPC/ACP extension method name.
 ///
-/// Restricting this to method-name characters prevents callers from smuggling
-/// an unknown extension's raw JSON payload through the normalized event seam.
+/// Restricting this to method-name characters is a defense-in-depth boundary.
+/// The Grok adapter additionally maps unknown raw method names to a fixed marker
+/// before constructing a normalized event.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct ExtensionMethod(String);
 

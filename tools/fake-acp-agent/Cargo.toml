@@ -13,4 +13,9 @@ tokio.workspace = true
 
 [dev-dependencies]
 grok-acp-probe = { path = "../grok-acp-probe" }
+grok-runtime.workspace = true
+tempfile.workspace = true
 
+[target.'cfg(windows)'.dev-dependencies]
+agent-client-protocol.workspace = true
+windows = { version = "=0.62.2", features = ["Win32_Foundation", "Win32_System_Threading"] }

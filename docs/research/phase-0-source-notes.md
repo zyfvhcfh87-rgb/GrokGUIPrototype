@@ -57,7 +57,7 @@ For this project:
 
 - advertise only client behavior the harness actually implements;
 - check the selected protocol is v1 before any session request;
-- preserve unknown `_meta` values inside the Grok adapter without leaking them into React;
+- preserve only bounded schema/presence markers for unknown `_meta` data inside the Grok adapter, while discarding its raw values before anything reaches React;
 - gate every optional method and UI control on the negotiated capability or returned configuration, not on public-source handler presence.
 
 ACP uses JSON-RPC requests for operations that return a result and notifications for one-way events. Notifications never receive responses. Standard extension methods should be underscore-prefixed, while implementation metadata can travel through `_meta`. ([ACP overview](https://agentclientprotocol.com/protocol/v1/overview))
@@ -67,14 +67,14 @@ ACP uses JSON-RPC requests for operations that return a result and notifications
 | Direction | Operation | Stable v1 status / gate | Phase 0 expectation |
 | --- | --- | --- | --- |
 | Client -> agent request | `initialize` | Required before session use | Must succeed and select v1. |
-| Client -> agent request | `authenticate` | Use an ID returned in `authMethods` | Exercise every safe, locally available advertised method without reading credential files. |
+| Client -> agent request | `authenticate` | Use an ID returned in `authMethods` | Exercise at least one safe advertised method available through Grok-owned ambient authentication without reading credential files; retain every other advertised method as unexercised and unknown until separately proved. |
 | Client -> agent request | `session/new` | Baseline | Absolute canonical `cwd`; empty MCP list is valid when no servers are supplied. |
 | Client -> agent request | `session/prompt` | Baseline | Updates may stream before the final prompt response. |
 | Client -> agent notification | `session/cancel` | Baseline prompt-turn cancellation | No response to the notification; original prompt request must ultimately finish as cancelled. |
 | Client -> agent request | `session/load` | Top-level `loadSession` capability | Must replay the conversation before returning. |
-| Client -> agent request | `session/list` | `sessionCapabilities.list` | Paginated; may be filtered by cwd. |
+| Client -> agent request | `session/list` | `sessionCapabilities.list` | Exercise the first page and cwd filter in Phase 0; cursor pagination is a Phase 2 lifecycle permutation. |
 | Client -> agent request | `session/resume` | `sessionCapabilities.resume` | Restores context without replaying history. |
-| Client -> agent request | `session/close` | `sessionCapabilities.close` | Cancels ongoing work and releases active resources. |
+| Client -> agent request | `session/close` | `sessionCapabilities.close` | Exercise idle close in Phase 0; close during an active turn is a Phase 2 safety permutation. |
 | Client -> agent request | `session/delete` | `sessionCapabilities.delete` | Out of MVP; do not expose unless intentionally added. |
 | Client -> agent request | `session/set_config_option` | Config option offered by session | Preferred model/mode/thought-level mechanism. |
 | Client -> agent request | `session/set_mode` | Legacy session modes capability | Deprecated compatibility fallback only. |
@@ -105,7 +105,7 @@ Prompt cancellation uses the `session/cancel` **notification**. The client must 
 
 ACP also defines optional JSON-RPC `$/cancel_request`, which targets an individual in-flight request. An implementation may cancel it and nested work, but it must still resolve the original request with a valid partial result or JSON-RPC cancellation error `-32800`. This mechanism is not interchangeable with turn-level `session/cancel`. ([ACP request cancellation](https://agentclientprotocol.com/protocol/v1/cancellation))
 
-**Live questions:** whether Grok accepts both mechanisms, how quickly each settles, whether it emits late updates, what it does with an in-flight permission/elicitation, and whether cancel is idempotent.
+**Live questions:** Phase 0 can classify each mechanism from a safe baseline observation or retain it as unknown. Repeated cancellation, late-update timing, and cancellation during permission or elicitation belong to the Phase 2 safety workflow.
 
 ### Tools and permission requests
 
@@ -113,7 +113,7 @@ Tools are represented by `tool_call` and `tool_call_update` session updates. A c
 
 An agent may ask the client for permission through `session/request_permission`, including the session ID, a tool-call update, and choice options. The client responds with a selected option ID or `cancelled`. Standard option kinds are allow once, allow always, reject once, and reject always. ([ACP permissions](https://agentclientprotocol.com/protocol/v1/tool-calls#requesting-permission))
 
-**Safety gap:** ACP does not require an exact command, cwd, affected path, or persistence scope as dedicated permission fields. Those details might be present in the correlated tool call's title/raw input/locations or in Grok-specific metadata, but the standard alone does not guarantee them. Phase 0 must capture sanitized real requests for shell, file-write, network/MCP, and malformed cases before the GUI designs an approval card. If exact scope cannot be established, deny is the safe result.
+**Safety gap:** ACP does not require an exact command, cwd, affected path, or persistence scope as dedicated permission fields. Those details might be present in the correlated tool call's title/raw input/locations or in Grok-specific metadata, but the standard alone does not guarantee them. Phase 0 should capture a sanitized installed request only when an exact non-destructive reproduction is available; otherwise installed behavior remains explicitly unknown. Phase 2 owns the exhaustive shell, file-write, network/MCP, malformed, stale, and orphaned permission permutations. If exact scope cannot be established, deny is the safe result.
 
 ### Elicitation
 
@@ -141,7 +141,15 @@ Stable session config options are the preferred mechanism. A session setup respo
 
 The client sets one through `session/set_config_option`; the agent returns the **complete** updated config state because one choice can change other available choices. The agent may likewise send a complete `config_option_update`. Legacy modes use `session/set_mode` and `current_mode_update`, but that API is deprecated. ([ACP config updates](https://agentclientprotocol.com/protocol/v1/session-config-options#setting-a-configuration-option), [legacy modes](https://agentclientprotocol.com/protocol/v1/session-modes))
 
-**Grok-specific gap:** the pinned public Grok initializer exposes model state and other controls in `_meta`, while the actual installed build may additionally or instead return standard session config options. The Phase 0 fixture must preserve both without hard-coding labels or option IDs.
+Grok's current source uses the legacy `session/set_model` request for both model and reasoning effort. The request carries the advertised `modelId` plus optional `_meta.reasoningEffort`; the effort must come from the advertised option's `value`, not its label or ID. Current source returns the effective model under `_meta.model` and emits a `model_changed` extension update. ([headless client](https://github.com/xai-org/grok-build/blob/bc7f02eddd3d84085849dc19ed216f11c23b0571/crates/codegen/xai-grok-pager/src/headless.rs#L649-L726), [ACP handler](https://github.com/xai-org/grok-build/blob/bc7f02eddd3d84085849dc19ed216f11c23b0571/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs#L2209-L2245), [model switch](https://github.com/xai-org/grok-build/blob/bc7f02eddd3d84085849dc19ed216f11c23b0571/crates/codegen/xai-grok-shell/src/agent/handlers/model_switch.rs#L14-L276))
+
+Grok's session mode IDs are `plan`, `ask`, and `default`, set through standard legacy `session/set_mode`; plan transitions emit standard `current_mode_update`. The private toggle-plan extension is non-idempotent and is not a suitable product control. ([mode IDs](https://github.com/xai-org/grok-build/blob/bc7f02eddd3d84085849dc19ed216f11c23b0571/crates/codegen/xai-grok-shell/src/session/acp_session_impl/session_mode.rs#L4-L23))
+
+Permission policy is a separate, private notification whose canonical values are `default`, `ask`, `auto`, and `always-approve`. It can affect multiple resident sessions when unscoped and has no reliable request/response echo, so Phase 0 deliberately does not mutate it. ([permission mappings](https://github.com/xai-org/grok-build/blob/bc7f02eddd3d84085849dc19ed216f11c23b0571/crates/codegen/xai-grok-pager/src/app/actions.rs#L948-L973), [server scoping](https://github.com/xai-org/grok-build/blob/bc7f02eddd3d84085849dc19ed216f11c23b0571/crates/codegen/xai-grok-shell/src/agent/mvp_agent/acp_agent.rs#L2641-L2717))
+
+Source code names these extensions `x.ai/*`, while Grok's pinned ACP 0.10.4 SDK adds the leading underscore on the JSON-RPC wire. The installed runtime evidence therefore records `_x.ai/*`; the adapter accepts both spellings at its boundary. ([pinned SDK extension serialization](https://github.com/agentclientprotocol/rust-sdk/blob/v0.10.4/src/agent-client-protocol/src/lib.rs#L221-L235))
+
+**Compatibility boundary:** preserve standard config options and Grok metadata without hard-coding labels or model IDs. Installed 1.0.5 can differ from current source even where the method is accepted; its model-setter response is one observed example.
 
 ## 3. Official Rust SDK assessment
 
@@ -167,7 +175,11 @@ The 2.0.0 `AcpAgent` implementation uses `std::process::Command::new` with separ
 
 The implementation bounds retained stderr, gives graceful protocol shutdown a short grace period, and then terminates the child. Its Windows fallback kills the direct child rather than a Unix-style process group. ([pinned SDK termination](https://github.com/agentclientprotocol/rust-sdk/blob/v2.0.0/src/agent-client-protocol/src/acp_agent.rs#L306-L335), [pinned protocol shutdown](https://github.com/agentclientprotocol/rust-sdk/blob/v2.0.0/src/agent-client-protocol/src/acp_agent.rs#L735-L768))
 
-That is a useful base, not completion evidence:
+The Phase 0 Windows adapter therefore replaces only the SDK's process-spawn component. `process-wrap` 10.0.0 creates the child suspended, assigns it to a kill-on-close Job Object, and resumes it only after containment succeeds; ACP's public `Lines` and `ConnectTo` continue to provide the official JSON-RPC implementation while the adapter enforces a bounded newline codec and sanitized line observer. Setup failures terminate the suspended child and fail closed rather than falling back to an uncontained launch. ([process-wrap Job Object adapter](https://github.com/watchexec/process-wrap/blob/v10.0.0/src/tokio/job_object.rs#L71-L128), [Win32 job implementation](https://github.com/watchexec/process-wrap/blob/v10.0.0/src/windows.rs#L118-L177), [ACP line transport](https://docs.rs/agent-client-protocol/2.0.0/agent_client_protocol/struct.Lines.html))
+
+Microsoft documents that child processes join the immediate job by default and that `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE` terminates job members when the final job handle closes. Creating the process suspended before assignment avoids the race in which it could spawn an uncontained descendant. This boundary is lifecycle containment, not a security sandbox. ([Job Objects](https://learn.microsoft.com/en-us/windows/win32/procthread/job-objects), [AssignProcessToJobObject](https://learn.microsoft.com/en-us/windows/win32/api/jobapi2/nf-jobapi2-assignprocesstojobobject))
+
+The stock SDK behavior remains useful on Unix, but its Windows launcher is not completion evidence:
 
 - verify clean EOF, graceful close, forced termination, app crash, and repeated restart on Windows;
 - inspect the process tree to prove no Grok descendant is orphaned;
@@ -176,7 +188,7 @@ That is a useful base, not completion evidence:
 
 ### Compatibility decision for the spike
 
-Start with SDK 2.0.0, stable protocol v1, and a small `GrokRuntime` adapter around:
+Use SDK 2.0.0, stable protocol v1, and a small `GrokRuntime` boundary around:
 
 1. process launch/termination;
 2. xAI authentication metadata and advertised method IDs;
@@ -185,35 +197,37 @@ Start with SDK 2.0.0, stable protocol v1, and a small `GrokRuntime` adapter arou
 
 Do not pin Grok's older 0.10.4 dependency merely because Grok itself uses it server-side. Client and server crate versions do not need to match when the negotiated wire schema is compatible. Conversely, do not declare 2.0.0 compatible just because both sides say v1. Compile and run the lifecycle below. If typed decoding rejects valid Grok extensions/messages or the SDK cannot meet lifecycle/cleanup requirements, preserve the failing fixture and then choose the smallest evidence-backed fallback: a narrow raw transport boundary or a tested older client version.
 
-## 4. Phase 0 evidence plan
+Phase 0 places the reusable process, wire-summary, diagnostic, and normalization components inside `grok-runtime`, while the probe crate still owns lifecycle orchestration. Phase 1 assembles those components behind the long-lived `GrokRuntime` interface and exposes the application-facing Tauri command/event boundary.
 
-Every row starts **unknown for the installed binary** until the harness records a sanitized fixture and result.
+## 4. Phase 0 classification plan
+
+Every row starts **unknown for the installed binary**. Phase 0 completes the compatibility classification by recording a safe installed observation, deterministic fake coverage, a version-specific or unsupported result, or an explicit unknown. It does not require unsafe or nondeterministic live triggers. Exhaustive safety and lifecycle permutations are Phase 2 work.
 
 | Area | Documented expectation | Evidence to record | Pass condition |
 | --- | --- | --- | --- |
 | Binary | xAI supports `grok agent stdio` | Resolved canonical path, `grok --version`, file identity; no credentials | Direct arg-array spawn works without shell or auto-update side effects. |
 | Framing | UTF-8 NDJSON on stdout; diagnostics on stderr | Raw-to-sanitized ordered frames, stderr classification | No non-ACP stdout; fragmented/combined reads are framed correctly. |
-| Initialize | Version negotiation and capabilities first | Full sanitized request/response | Selected v1; unknown extensions survive adapter parsing. |
-| Authentication | Choose advertised method only | Advertised methods and result/error per safe method | No credential-file reads; success/failure is actionable and redacted. |
+| Initialize | Version negotiation and capabilities first | Full sanitized request/response | Selected v1; unknown extensions produce a safe presence marker without retaining their raw name or payload. |
+| Authentication | Choose advertised method only | Advertised methods and result/error for one safe ambient method | No credential-file reads; one safe advertised method succeeds, while every other advertised method remains explicitly unexercised/unknown. |
 | New/prompt | Baseline session lifecycle | Session ID shape, updates, prompt result | Markdown chunks, thought, tools, usage, errors normalize deterministically. |
-| Cancel | `session/cancel` settles original prompt as cancelled | Timeline of notification, late updates, permission state, final response | No hung request/tool; repeated cancel is safe. |
+| Cancel | `session/cancel` settles original prompt as cancelled | Baseline notification and final response timeline | One safe installed cancellation settles without a hung request; repeated and callback-in-flight permutations remain Phase 2 work. |
 | Request cancel | Optional `$/cancel_request` | Supported/unsupported result and nested effects | Behavior is distinct, correlated, and bounded. |
-| List/load | Capability-gated; load replays before response | Pagination plus update/response ordering | Full replay can rebuild presentation state deterministically. |
+| List/load | Capability-gated; load replays before response | First-page result plus load update/response ordering | Load replay can rebuild presentation state deterministically; cursor pagination remains a Phase 2 permutation. |
 | Resume | Capability-gated; no replay | Resume response and first subsequent prompt | Context resumes without duplicate transcript events. |
-| Close | Capability-gated; cancel/release active resources | Close during idle and active turn; process/session state | No further active work; persisted-session behavior documented, not guessed. |
+| Close | Capability-gated; cancel/release active resources | Idle close and resulting process/session state | Idle close is classified without guessing deletion semantics; active-turn close remains a Phase 2 permutation. |
 | Configuration | Complete standard config state or Grok extension | Session response, config changes, resulting updates | Models/reasoning/modes render from negotiated data. |
-| Permissions | Correlated request and selectable outcomes | Safe real fixtures for allow/reject once/always, malformed, stale | Exact consequence is displayable; otherwise deny/cancel. |
-| Elicitation | Explicit form/URL capability and tri-state result | Supported modes, form schema, URL request, completion | No secrets enter transcript/logs; stale/unsupported requests fail safely. |
-| Plans | Full replacement update; no standard approval | Multiple plan mutations and any xAI review operation | Reducer replaces rather than appends; UI does not invent approval. |
+| Permissions | Correlated request and selectable outcomes | Deterministic fake contract plus a safe installed request only if reproducible | Installed behavior is either observed or explicit unknown; exact-scope and choice permutations are Phase 2 work and otherwise deny/cancel. |
+| Elicitation | Explicit form/URL capability and tri-state result | Deterministic fake contract plus safe installed behavior if it occurs | Installed behavior is either observed or explicit unknown; no secret enters persisted diagnostics, and exhaustive modes/actions are Phase 2 work. |
+| Plans | Full replacement update; no standard approval | Deterministic replacement fixture plus any safely observed installed update | Replacement semantics are proved without inventing approval; installed review/revision may remain unknown. |
 | Tool events | Incremental call/update state | Terminal, file/diff, background task, MCP, failure | Out-of-order/partial updates reduce safely by tool-call ID. |
 | Bad input | JSON-RPC errors and transport failure remain bounded | Malformed JSON, invalid params, unknown notification, duplicate/unknown IDs | Harness reports/redacts error and remains usable or reconnects cleanly. |
 | Stderr/crash | Stderr is diagnostic; process can exit independently | Bounded redacted stderr, exit status, pending-request outcomes | No secret persistence, deadlock, or orphan process. |
 | Restart | Client may reconnect and restore sessions | Crash then respawn/list/load-or-resume trace | State transitions are deterministic and the user can recover. |
 | Shutdown | Graceful first, forced fallback | EOF/close timing and process-tree check | Child and descendants are gone; no pending task survives. |
 
-### Minimum fixture set
+### Cross-phase fixture matrix
 
-Record fixtures by installed Grok version and negotiated capability fingerprint:
+The following is the desired end-state matrix, recorded by installed Grok version and negotiated capability fingerprint. Phase 0 captures the safe installed baseline, proves deterministic contracts with the fake agent, and classifies anything unobserved. Phase 2 completes the exhaustive safety and lifecycle permutations in items 5-8, including every permission choice, elicitation mode/action, cancellation timing, cursor pagination, and active-turn close.
 
 1. initialize success, incompatible version, and missing/unknown capability fields;
 2. authentication success, rejection, cancellation, and unavailable advertised method;
@@ -226,7 +240,7 @@ Record fixtures by installed Grok version and negotiated capability fingerprint:
 9. invalid JSON, invalid JSON-RPC shape, unknown method/notification, duplicate ID, stderr burst, abrupt EOF, nonzero exit, and restart;
 10. graceful shutdown and forced shutdown with a Windows process-tree orphan check.
 
-Sanitization should replace credentials, user text, absolute private paths, repository contents, URLs containing tokens, environment values, and tool output while keeping protocol method names, ordering, IDs (consistently remapped), capability shapes, status transitions, and error codes.
+Sanitization should replace credentials, user text, absolute private paths, repository contents, URLs containing tokens, environment values, and tool output while keeping protocol method names, ordering, IDs (consistently remapped), capability shapes, status transitions, and error codes. Installed-runtime captures use schema-versioned shape wrappers with bounded field paths and an explicit per-frame truncation marker; they discard scalar wire values and raw stderr text.
 
 ## 5. Explicit unknowns after documentation research
 
@@ -242,11 +256,12 @@ These questions cannot be closed from official documentation/source alone:
 - How Grok represents plan review or revision; stable ACP does not answer this.
 - Whether Grok implements `$/cancel_request` in addition to baseline `session/cancel`.
 - How malformed frames, invalid request IDs, late responses, stderr bursts, process crashes, and reconnects behave.
-- Whether SDK 2.0's Windows termination path leaves any descendant process in Grok's actual process topology.
+- How cursor pagination behaves when an installed session list spans multiple pages, and how installed Grok settles close during an active turn. These remain Phase 2 lifecycle permutations.
+- Whether the stock SDK 2.0 direct-child Windows termination path would orphan an installed-Grok-specific descendant. This no longer blocks the product boundary: the Job Object adapter is independently proved with a fake descendant and an installed-runtime crash/restart pass.
 - What sensitive data appears on stderr or in raw extension metadata and therefore needs redaction.
 
-Until Phase 0 answers those with versioned fixtures, they should remain explicit `unknown` entries in the compatibility evidence table rather than optimistic defaults.
+The Phase 0 evidence report records which questions were answered and retains the rest as explicit installed-runtime `unknown` entries rather than optimistic defaults. That classification, rather than elimination of every unknown, is the compatibility spike's completion criterion. Phase 2 closes the exhaustive safety and lifecycle permutations required by the product workflow.
 
 ## 6. Scope note
 
-No Tauri API is needed for this research-stage harness. Phase 0 should be a minimal Rust compatibility executable so ACP/process behavior can be proved independently of desktop commands, events, permissions, and UI state. Tauri capability and CSP design belongs at the Phase 1 application boundary after the deep `GrokRuntime` seam is stable.
+No Tauri API is needed for this research-stage harness. Phase 0 remains a minimal Rust compatibility executable so ACP/process behavior can be proved independently of desktop commands, events, permissions, and UI state. Phase 1 assembles the proven `grok-runtime` components into the long-lived `GrokRuntime` service and adds the typed Tauri command/event boundary; restrictive Tauri capabilities and CSP design belong there.

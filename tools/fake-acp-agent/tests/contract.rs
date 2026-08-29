@@ -1,10 +1,27 @@
-use std::{process::Stdio, time::Duration};
+use std::{ffi::OsString, process::Stdio, time::Duration};
+
+use grok_runtime::normalize_grok_session_response;
+#[cfg(windows)]
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use serde_json::{Value, json};
 use tokio::{
     io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader, Lines},
     process::{Child, ChildStdin, ChildStdout, Command},
     time::timeout,
+};
+
+#[cfg(windows)]
+use tokio::time::sleep;
+#[cfg(windows)]
+use windows::Win32::{
+    Foundation::{CloseHandle, HANDLE, WAIT_FAILED, WAIT_OBJECT_0},
+    System::Threading::{
+        OpenProcess, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE, TerminateProcess, WaitForSingleObject,
+    },
 };
 
 struct AgentProcess {
@@ -15,8 +32,12 @@ struct AgentProcess {
 
 impl AgentProcess {
     fn spawn(scenario: &str) -> Self {
+        Self::spawn_args([OsString::from(scenario)])
+    }
+
+    fn spawn_args(args: impl IntoIterator<Item = OsString>) -> Self {
         let mut child = Command::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
-            .arg(scenario)
+            .args(args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -80,6 +101,18 @@ async fn lifecycle_negotiates_v1_and_advertises_supported_callbacks() {
     assert!(response["result"]["agentCapabilities"]["sessionCapabilities"]["close"].is_object());
     assert_eq!(response["result"]["authMethods"][0]["id"], "fixture_auth");
 
+    let normalized = normalize_grok_session_response(response);
+    let catalog = normalized
+        .models
+        .expect("fake initialize model state must cross the runtime boundary");
+    assert_eq!(catalog.current_model_id, "fixture-model");
+    assert_eq!(catalog.available_models.len(), 1);
+    let model = &catalog.available_models[0];
+    assert_eq!(model.reasoning_effort.as_deref(), Some("high"));
+    assert_eq!(model.reasoning_efforts.len(), 2);
+    assert_eq!(model.reasoning_efforts[1].value, "high");
+    assert!(model.reasoning_efforts[1].is_default);
+
     drop(agent.stdin);
     let status = timeout(Duration::from_secs(2), agent.child.wait())
         .await
@@ -89,7 +122,7 @@ async fn lifecycle_negotiates_v1_and_advertises_supported_callbacks() {
 }
 
 #[tokio::test]
-async fn lifecycle_manages_sessions_and_replays_before_resume_response() {
+async fn lifecycle_resumes_without_replay() {
     let mut agent = AgentProcess::spawn("lifecycle");
     agent
         .send(json!({
@@ -154,13 +187,6 @@ async fn lifecycle_manages_sessions_and_replays_before_resume_response() {
             }
         }))
         .await;
-    let replay = agent.receive().await;
-    assert_eq!(replay["method"], "session/update");
-    assert_eq!(replay["params"]["sessionId"], "session-001");
-    assert_eq!(
-        replay["params"]["update"]["sessionUpdate"],
-        "agent_message_chunk"
-    );
     assert_eq!(
         agent.receive().await,
         json!({ "jsonrpc": "2.0", "id": 5, "result": {} })
@@ -425,4 +451,339 @@ async fn crash_scenario_exits_nonzero_with_a_sanitized_diagnostic() {
     assert_eq!(status.code(), Some(86));
     assert!(stdout_bytes.is_empty());
     assert_eq!(diagnostic, "fake-acp-agent: deterministic crash fixture\n");
+}
+
+#[tokio::test]
+async fn crash_then_new_process_resumes_then_loads_persisted_session() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should be created");
+    let state_file = temporary_directory.path().join("session-state.json");
+    let persistent_args = |scenario: &str| {
+        [
+            OsString::from(scenario),
+            OsString::from("--state-file"),
+            state_file.as_os_str().to_os_string(),
+        ]
+    };
+
+    let mut crashed = AgentProcess::spawn_args(persistent_args("crash-after-new"));
+    initialize_and_authenticate(&mut crashed).await;
+    crashed
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/new",
+            "params": { "cwd": "C:\\fixture-workspace", "mcpServers": [] }
+        }))
+        .await;
+    assert_eq!(
+        crashed.receive().await["result"]["sessionId"],
+        "session-001"
+    );
+    let crash_status = timeout(Duration::from_secs(2), crashed.child.wait())
+        .await
+        .expect("post-session crash should be prompt")
+        .expect("crashed process should be waitable");
+    assert_eq!(crash_status.code(), Some(86));
+
+    let mut recovered = AgentProcess::spawn_args(persistent_args("lifecycle"));
+    initialize_and_authenticate(&mut recovered).await;
+    recovered
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/list",
+            "params": {}
+        }))
+        .await;
+    assert_eq!(
+        recovered.receive().await["result"]["sessions"][0]["sessionId"],
+        "session-001"
+    );
+
+    recovered
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/resume",
+            "params": {
+                "sessionId": "session-001",
+                "cwd": "C:\\fixture-workspace",
+                "mcpServers": []
+            }
+        }))
+        .await;
+    assert_eq!(
+        recovered.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 4, "result": {} })
+    );
+
+    recovered
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "session/load",
+            "params": {
+                "sessionId": "session-001",
+                "cwd": "C:\\fixture-workspace",
+                "mcpServers": []
+            }
+        }))
+        .await;
+    assert_eq!(
+        recovered.receive().await["params"]["update"]["sessionUpdate"],
+        "user_message_chunk"
+    );
+    assert_eq!(
+        recovered.receive().await["params"]["update"]["sessionUpdate"],
+        "agent_message_chunk"
+    );
+    assert_eq!(
+        recovered.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 5, "result": {} })
+    );
+
+    recovered
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "session/close",
+            "params": { "sessionId": "session-001" }
+        }))
+        .await;
+    assert_eq!(
+        recovered.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 6, "result": {} })
+    );
+    drop(recovered.stdin);
+    assert!(
+        timeout(Duration::from_secs(2), recovered.child.wait())
+            .await
+            .expect("recovered process should stop after EOF")
+            .expect("recovered process should be waitable")
+            .success()
+    );
+}
+
+async fn initialize_and_authenticate(agent: &mut AgentProcess) {
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "protocolVersion": 1, "clientCapabilities": {} }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["result"]["protocolVersion"], 1);
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "authenticate",
+            "params": { "methodId": "fixture_auth" }
+        }))
+        .await;
+    assert_eq!(
+        agent.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 2, "result": {} })
+    );
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn graceful_parent_eof_stops_its_test_descendant() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should be created");
+    let sentinel_directory = temporary_directory.path().join("sentinel");
+    let mut cleanup = SentinelCleanup::new(sentinel_directory.clone());
+    let mut agent = AgentProcess::spawn_args(descendant_args(&sentinel_directory));
+
+    initialize_descendant(&mut agent).await;
+    cleanup.arm(wait_for_pid(&sentinel_directory.join("sentinel.ready")).await);
+    wait_for_counter_greater(&sentinel_directory.join("sentinel.heartbeat"), 0).await;
+
+    drop(agent.stdin);
+    let parent_status = timeout(Duration::from_secs(4), agent.child.wait())
+        .await
+        .expect("descendant fixture should stop after EOF")
+        .expect("descendant fixture should be waitable");
+    assert!(parent_status.success());
+    assert_eq!(
+        wait_for_text(&sentinel_directory.join("sentinel.stopped")).await,
+        "requested"
+    );
+    cleanup.disarm();
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn abrupt_parent_exit_exposes_orphan_and_test_reaps_its_own_sentinel() {
+    let temporary_directory = tempfile::tempdir().expect("temporary directory should be created");
+    let sentinel_directory = temporary_directory.path().join("sentinel");
+    let mut cleanup = SentinelCleanup::new(sentinel_directory.clone());
+    let mut agent = AgentProcess::spawn_args(descendant_args(&sentinel_directory));
+
+    initialize_descendant(&mut agent).await;
+    cleanup.arm(wait_for_pid(&sentinel_directory.join("sentinel.ready")).await);
+    let before = wait_for_counter_greater(&sentinel_directory.join("sentinel.heartbeat"), 0).await;
+
+    agent
+        .child
+        .kill()
+        .await
+        .expect("test should be able to terminate its fixture parent");
+    let parent_status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("terminated fixture parent should stop")
+        .expect("terminated fixture parent should be waitable");
+    assert!(!parent_status.success());
+
+    let after =
+        wait_for_counter_greater(&sentinel_directory.join("sentinel.heartbeat"), before).await;
+    assert!(
+        after > before,
+        "heartbeat must advance after the parent dies to prove the descendant survived"
+    );
+
+    assert_eq!(cleanup.stop_and_wait().await, "requested");
+}
+
+#[cfg(windows)]
+fn descendant_args(directory: &Path) -> [OsString; 3] {
+    [
+        OsString::from("descendant"),
+        OsString::from("--sentinel-dir"),
+        directory.as_os_str().to_os_string(),
+    ]
+}
+
+#[cfg(windows)]
+async fn initialize_descendant(agent: &mut AgentProcess) {
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "protocolVersion": 1, "clientCapabilities": {} }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["result"]["protocolVersion"], 1);
+}
+
+#[cfg(windows)]
+async fn wait_for_pid(path: &Path) -> u32 {
+    wait_for_text(path)
+        .await
+        .parse()
+        .expect("sentinel ready file should contain its process identifier")
+}
+
+#[cfg(windows)]
+async fn wait_for_text(path: &Path) -> String {
+    timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(contents) = fs::read_to_string(path) {
+                return contents.trim().to_owned();
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {}", path.display()))
+}
+
+#[cfg(windows)]
+async fn wait_for_counter_greater(path: &Path, minimum: u64) -> u64 {
+    timeout(Duration::from_secs(3), async {
+        loop {
+            if let Ok(contents) = fs::read_to_string(path)
+                && let Ok(value) = contents.trim().parse::<u64>()
+                && value > minimum
+            {
+                return value;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for {} to advance", path.display()))
+}
+
+#[cfg(windows)]
+struct SentinelCleanup {
+    directory: PathBuf,
+    handle: Option<HANDLE>,
+}
+
+#[cfg(windows)]
+impl SentinelCleanup {
+    fn new(directory: PathBuf) -> Self {
+        Self {
+            directory,
+            handle: None,
+        }
+    }
+
+    fn arm(&mut self, pid: u32) {
+        assert!(self.handle.is_none(), "sentinel cleanup must only arm once");
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, false, pid) }
+            .expect("test should open its own sentinel process");
+        self.handle = Some(handle);
+    }
+
+    fn disarm(&mut self) {
+        if let Some(handle) = self.handle.take() {
+            unsafe { CloseHandle(handle) }.expect("sentinel process handle should close");
+        }
+    }
+
+    async fn stop_and_wait(&mut self) -> String {
+        fs::write(self.directory.join("sentinel.stop"), b"stop\n")
+            .expect("test should be able to request sentinel shutdown");
+        let reason = wait_for_text(&self.directory.join("sentinel.stopped")).await;
+        let handle = self.handle.expect("sentinel cleanup should be armed");
+        wait_for_sentinel_exit(handle).await;
+        self.disarm();
+        reason
+    }
+}
+
+#[cfg(windows)]
+async fn wait_for_sentinel_exit(handle: HANDLE) {
+    timeout(Duration::from_secs(3), async {
+        loop {
+            let wait = unsafe { WaitForSingleObject(handle, 0) };
+            if wait == WAIT_OBJECT_0 {
+                return;
+            }
+            assert_ne!(wait, WAIT_FAILED, "waiting for sentinel process failed");
+            sleep(Duration::from_millis(20)).await;
+        }
+    })
+    .await
+    .expect("sentinel process should exit after its stop acknowledgement");
+}
+
+#[cfg(windows)]
+impl Drop for SentinelCleanup {
+    fn drop(&mut self) {
+        let Some(handle) = self.handle.take() else {
+            return;
+        };
+
+        let _ = fs::write(self.directory.join("sentinel.stop"), b"stop\n");
+        for _ in 0..100 {
+            let wait = unsafe { WaitForSingleObject(handle, 0) };
+            if wait == WAIT_OBJECT_0 {
+                unsafe { CloseHandle(handle) }.ok();
+                return;
+            }
+            if wait == WAIT_FAILED {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+
+        unsafe { TerminateProcess(handle, 1) }.ok();
+        let _ = unsafe { WaitForSingleObject(handle, 2_000) };
+        unsafe { CloseHandle(handle) }.ok();
+    }
 }
