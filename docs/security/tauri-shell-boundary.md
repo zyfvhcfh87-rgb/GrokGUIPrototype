@@ -1,6 +1,6 @@
 # Tauri shell security boundary
 
-Issue #6 establishes a deliberately small desktop boundary, and issue #7 adds one reviewed application-specific bridge through it. The shell renders the packaged React application and grants the webview no filesystem, process, dialog, external-link, network, or broad plugin permissions.
+Issue #6 establishes a deliberately small desktop boundary, issue #7 adds the long-lived runtime, and issue #8 narrows the React-facing interface to reviewed commands and bounded application events. The shell renders the packaged React application and grants the webview no filesystem, process, dialog, external-link, network, or broad plugin permissions.
 
 ## Trust boundary
 
@@ -8,7 +8,8 @@ Issue #6 establishes a deliberately small desktop boundary, and issue #7 adds on
 packaged React assets
     -> one local Tauri webview (`main`)
     -> empty capability permission set
-    -> typed `GrokRuntime` application commands and normalized events
+    -> reviewed application DTOs and `grok-application-event`
+    -> private `GrokRuntime` command and event enums
     -> no native access plugins
 ```
 
@@ -18,7 +19,8 @@ packaged React assets
 - `withGlobalTauri` and the asset protocol are disabled.
 - No remote origin is attached to a capability. The `main-shell` capability is local, targets only the `main` window, and starts with an empty permission list.
 - Tauri's compile-time CSP rewriting remains enabled, and the production policy permits no remote script, style, font, frame, form, object, image, or network source.
-- The Rust crate registers only lifecycle, domain-command, and interaction-response operations for `GrokRuntime`; it initializes no plugins. The bridge accepts no raw JSON-RPC payload, executable path, launch argument, credential, native handle, or unrestricted filesystem operation.
+- The Rust crate registers only setup/workspace, lifecycle, session, turn/control, and interaction-response operations; it initializes no plugins. The generic runtime command enum is not a Tauri input. The bridge accepts no raw JSON-RPC payload, executable path, launch argument, credential, native handle, or unrestricted filesystem operation.
+- Runtime events are projected to bounded application DTOs and wrapped in a generation plus sequence before emission. Unknown extension method names and payloads are discarded rather than forwarded.
 - Tauri application commands are available to local application windows by default. This application defines only the packaged `main` window and attaches no remote origin. Adding another window or any remote content requires a new boundary review before it may reach these commands.
 - The service owns the contained Grok child process. React cannot spawn arbitrary processes, show native dialogs, open external URLs, or access Grok credential and session files.
 

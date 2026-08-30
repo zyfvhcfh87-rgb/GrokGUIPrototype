@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "eventName": "grok-application-event",
+  "commands": [
+    "setup_status",
+    "workspace_validate",
+    "runtime_snapshot",
+    "runtime_start",
+    "runtime_stop",
+    "runtime_restart",
+    "session_new",
+    "session_list",
+    "session_load",
+    "session_resume",
+    "session_close",
+    "prompt_send",
+    "prompt_cancel",
+    "session_set_mode",
+    "session_set_model",
+    "session_set_config",
+    "permission_respond",
+    "elicitation_respond"
+  ],
+  "dtoFields": {
+    "applicationEventEnvelope": ["event", "generation", "sequence"],
+    "applicationError": ["code", "diagnostic", "recoverable"],
+    "workspaceRequest": ["path"],
+    "workspace": ["path"],
+    "newSessionRequest": ["workspace"],
+    "listSessionsRequest": ["cursor", "workspace"],
+    "sessionWorkspaceRequest": ["sessionId", "workspace"],
+    "sessionRequest": ["sessionId"],
+    "promptRequest": ["sessionId", "text"],
+    "setSessionModeRequest": ["modeId", "sessionId"],
+    "setSessionModelRequest": ["modelId", "reasoningEffort", "sessionId"],
+    "setSessionConfigRequest": ["configId", "sessionId", "value"],
+    "permissionResponseRequest": ["decision", "interactionId"],
+    "elicitationResponseRequest": ["decision", "interactionId"],
+    "setupStatus": ["failure", "runtimeAvailable"],
+    "acknowledgement": ["acknowledged"],
+    "promptResult": ["stopReason"],
+    "runtimeSnapshot": ["capabilities", "generation", "lastSequence", "state"],
+    "runtimeCapabilities": ["agent", "authenticationMethods", "models", "protocolVersion", "sessions", "truncated"],
+    "runtimeAgent": ["product", "version"],
+    "runtimeSessionCapabilities": ["cancel", "close", "create", "list", "load", "prompt", "resume"],
+    "modelCatalog": ["availableModels", "currentModelId", "truncated"],
+    "model": ["agentType", "description", "modelId", "name", "reasoningEffort", "reasoningEfforts", "supportsReasoningEffort", "totalContextTokens", "truncated"],
+    "reasoningEffort": ["description", "id", "isDefault", "label", "value"],
+    "session": ["controls", "legacyConfigOptions", "models", "sessionId", "truncated"],
+    "legacyConfigOption": ["category", "description", "id", "label", "selected"],
+    "sessionControls": ["configOptions", "modes", "truncated"],
+    "sessionModes": ["availableModes", "currentModeId", "truncated"],
+    "sessionMode": ["description", "id", "name"],
+    "sessionPage": ["nextCursor", "sessions", "truncated"],
+    "sessionSummary": ["sessionId", "title", "updatedAt", "workspace"],
+    "planEntry": ["description", "id", "status", "title"],
+    "usage": ["cachedInputTokens", "contextWindowTokens", "inputTokens", "outputTokens", "totalTokens"],
+    "availableCommand": ["acceptsInput", "description", "name"],
+    "configOption": ["description", "id", "kind", "name"],
+    "configChoice": ["description", "group", "name", "value"]
+  },
+  "variantFields": {
+    "permissionScope": {
+      "tool": ["toolName"],
+      "command": ["command", "workingDirectory"],
+      "filesystem": ["operation", "path"],
+      "network": ["destination"],
+      "other": []
+    },
+    "elicitationControl": {
+      "text": ["fieldId", "label", "placeholder", "sensitive"],
+      "confirmation": ["fieldId", "label"],
+      "choice": ["fieldId", "label", "multiple", "options", "truncated"],
+      "other": []
+    },
+    "configValue": {
+      "select": ["value"],
+      "boolean": ["value"]
+    },
+    "elicitationDecision": {
+      "accept": ["value"],
+      "decline": [],
+      "cancel": []
+    },
+    "elicitationValue": {
+      "string": ["value"],
+      "integer": ["value"],
+      "number": ["value"],
+      "boolean": ["value"],
+      "string_array": ["value"]
+    },
+    "optionalUpdate": {
+      "not_reported": [],
+      "cleared": [],
+      "value": ["value"]
+    },
+    "configOptionKind": {
+      "select": ["currentValue", "options", "truncated"],
+      "boolean": ["currentValue"]
+    }
+  },
+  "enumValues": {
+    "runtimeState": ["connecting", "authenticating", "ready", "working", "waiting_for_input", "failed", "disconnected"],
+    "sessionState": ["creating", "ready", "working", "waiting_for_input", "cancelling", "completed", "closed", "failed"],
+    "activityStatus": ["pending", "running", "waiting_for_input", "completed", "failed", "cancelled"],
+    "toolCallKind": ["tool", "terminal_command", "background_task", "subagent", "other"],
+    "permissionDecision": ["allow_once", "allow_always", "deny_once", "deny_always", "cancel"],
+    "runtimeExtensionArea": ["models", "settings", "sessions", "queue", "prompt_completion", "session", "announcements", "mcp", "malformed"],
+    "authenticationMethod": ["cached_token", "grok_com", "xai_api_key", "grok", "other"],
+    "runtimeAgentProduct": ["grok_build", "other"],
+    "promptStopReason": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled", "other"],
+    "planEntryStatus": ["pending", "in_progress", "completed"],
+    "observedExtensionClassification": ["unknown", "invalid"],
+    "interactionKind": ["permission", "elicitation"],
+    "applicationErrorCode": ["executable_unavailable", "process_start_failed", "connection_failed", "request_timed_out", "initialize_failed", "unsupported_protocol", "unsupported_authentication", "authentication_failed", "runtime_stopped", "invalid_workspace", "invalid_request", "capability_unavailable", "protocol_request_failed", "malformed_response", "unknown_interaction", "decision_unavailable", "unexpected_response", "boundary_violation"]
+  },
+  "events": {
+    "runtime_state_changed": ["state"],
+    "session_state_changed": ["sessionId", "state"],
+    "user_message_chunk_received": ["messageId", "sessionId", "text", "truncated"],
+    "message_chunk_received": ["messageId", "sessionId", "text", "truncated"],
+    "thought_chunk_received": ["sessionId", "text", "thoughtId", "truncated"],
+    "tool_call_changed": ["callId", "detail", "kind", "sessionId", "status", "title"],
+    "permission_requested": ["availableDecisions", "consequence", "interactionId", "scope", "sessionId", "title"],
+    "elicitation_requested": ["control", "interactionId", "prompt", "sessionId"],
+    "plan_changed": ["entries", "sessionId", "truncated"],
+    "usage_changed": ["sessionId", "usage"],
+    "session_metadata_changed": ["sessionId"],
+    "available_commands_changed": ["commands", "sessionId", "truncated"],
+    "session_mode_changed": ["currentModeId", "sessionId"],
+    "session_config_options_changed": ["configOptions", "sessionId", "truncated"],
+    "session_info_changed": ["sessionId", "title", "updatedAt"],
+    "runtime_failed": ["diagnostic", "recoverable"],
+    "runtime_extension_invalidated": ["area", "sessionId"],
+    "extension_observed": ["classification"],
+    "session_activated": ["sessionId"],
+    "interaction_resolved": ["interactionId", "kind"],
+    "interactions_cleared": ["sessionId"]
+  }
+}

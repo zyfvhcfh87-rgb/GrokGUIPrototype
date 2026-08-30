@@ -71,6 +71,7 @@ enum LifecycleFault {
     PromptError,
     CancelError,
     CloseError,
+    HangClose,
     HangPrompt,
 }
 
@@ -555,7 +556,10 @@ fn run_lifecycle(
                 }
             }
             "session/close" if state.authenticated && state.session_created => {
-                state.session_open = false;
+                if lifecycle_fault == Some(LifecycleFault::HangClose) {
+                    state.session_open = false;
+                    continue;
+                }
                 if lifecycle_fault == Some(LifecycleFault::CloseError) {
                     write_frame(
                         &mut output,
@@ -563,6 +567,7 @@ fn run_lifecycle(
                     )?;
                     continue;
                 }
+                state.session_open = false;
                 if let Some(path) = close_marker {
                     write_fixed_marker(path, CLOSED_SESSION_MARKER)?;
                 }

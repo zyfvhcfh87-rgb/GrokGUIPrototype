@@ -201,6 +201,7 @@ async fn session_lifecycle_is_exposed_without_acp_method_names() {
     );
     assert!(page.next_cursor.is_none());
 
+    let mut events = runtime.subscribe();
     for command in [
         RuntimeCommand::ResumeSession {
             session_id: session.session_id.clone(),
@@ -219,6 +220,22 @@ async fn session_lifecycle_is_exposed_without_acp_method_names() {
             panic!("expected a recovered session");
         };
         assert_eq!(recovered.session_id, session.session_id);
+        assert!(matches!(
+            events.recv().await.expect("activation event"),
+            RuntimeEvent::SessionActivated { ref session_id }
+                if session_id == &session.session_id
+        ));
+        loop {
+            if matches!(
+                events.recv().await.expect("ready event"),
+                RuntimeEvent::SessionStateChanged {
+                    ref session_id,
+                    state: grok_runtime::SessionState::Ready,
+                } if session_id == &session.session_id
+            ) {
+                break;
+            }
+        }
     }
 
     assert_eq!(
@@ -527,10 +544,22 @@ async fn cancellation_denies_a_pending_interaction_and_expires_its_gui_id() {
 
     runtime
         .execute(RuntimeCommand::Cancel {
-            session_id: session.session_id,
+            session_id: session.session_id.clone(),
         })
         .await
         .expect("cancel should be delivered");
+    loop {
+        if matches!(
+            events
+                .recv()
+                .await
+                .expect("runtime event channel should remain open"),
+            RuntimeEvent::InteractionsCleared { session_id: Some(ref cleared) }
+                if cleared == &session.session_id
+        ) {
+            break;
+        }
+    }
     assert_eq!(
         prompt
             .await
@@ -547,6 +576,264 @@ async fn cancellation_denies_a_pending_interaction_and_expires_its_gui_id() {
             .is_err(),
         "cancelled GUI interaction IDs must expire"
     );
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn closing_a_session_cancels_pending_interactions_and_expires_their_gui_ids() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    let mut events = runtime.subscribe();
+    let prompt_runtime = runtime.clone();
+    let session_id = session.session_id.clone();
+    let prompt = tokio::spawn(async move {
+        prompt_runtime
+            .execute(RuntimeCommand::Prompt {
+                session_id,
+                text: "Close at the permission boundary.".to_owned(),
+            })
+            .await
+    });
+    let interaction_id = loop {
+        if let RuntimeEvent::PermissionRequested { interaction_id, .. } =
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("permission event timed out")
+                .expect("runtime event channel should remain open")
+        {
+            break interaction_id;
+        }
+    };
+
+    assert_eq!(
+        runtime
+            .execute(RuntimeCommand::CloseSession {
+                session_id: session.session_id.clone(),
+            })
+            .await
+            .expect("session should close"),
+        RuntimeResponse::Acknowledged
+    );
+
+    let mut saw_clear = false;
+    let mut saw_closed = false;
+    while !(saw_clear && saw_closed) {
+        match tokio::time::timeout(Duration::from_secs(5), events.recv())
+            .await
+            .expect("close event timed out")
+            .expect("runtime event channel should remain open")
+        {
+            RuntimeEvent::InteractionsCleared {
+                session_id: Some(ref cleared),
+            } if cleared == &session.session_id => saw_clear = true,
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Closed,
+            } if session_id == &session.session_id => saw_closed = true,
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Ready,
+            } if session_id == &session.session_id => {
+                panic!("session must not return to ready while close is in flight");
+            }
+            _ => {}
+        }
+    }
+    assert_eq!(
+        tokio::time::timeout(Duration::from_secs(5), prompt)
+            .await
+            .expect("prompt cancellation timed out")
+            .expect("prompt task should join")
+            .expect("fixture should return a cancellation result"),
+        RuntimeResponse::PromptCompleted {
+            stop_reason: RuntimePromptStopReason::Cancelled,
+        }
+    );
+    while let Ok(event) = events.try_recv() {
+        assert!(
+            !matches!(
+                event,
+                RuntimeEvent::SessionStateChanged {
+                    ref session_id,
+                    state: grok_runtime::SessionState::Ready,
+                } if session_id == &session.session_id
+            ),
+            "prompt completion after close must not resurrect session readiness"
+        );
+    }
+    assert!(
+        runtime
+            .respond_permission(&interaction_id, PermissionDecision::AllowOnce)
+            .await
+            .is_err(),
+        "closed-session GUI interaction IDs must expire"
+    );
+    let error = runtime
+        .execute(RuntimeCommand::Prompt {
+            session_id: session.session_id.clone(),
+            text: "A closed session must not restart.".to_owned(),
+        })
+        .await
+        .expect_err("closed sessions require explicit load or resume");
+    assert_eq!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+    let error = runtime
+        .execute(RuntimeCommand::CloseSession {
+            session_id: session.session_id,
+        })
+        .await
+        .expect_err("an unavailable session must not be closed again");
+    assert_eq!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn rejected_close_restores_the_open_session_and_its_interaction_gate() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "close-error"])
+            .auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    let mut events = runtime.subscribe();
+
+    runtime
+        .execute(RuntimeCommand::CloseSession {
+            session_id: session.session_id.clone(),
+        })
+        .await
+        .expect_err("fixture close should be rejected");
+    loop {
+        if matches!(
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("close recovery event timed out")
+                .expect("runtime event channel should remain open"),
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Ready,
+            } if session_id == &session.session_id
+        ) {
+            break;
+        }
+    }
+
+    complete_first_fixture_prompt(&runtime, &session.session_id).await;
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn timed_out_close_stays_fail_closed_until_explicit_reactivation() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "hang-close"])
+            .auth_method("fixture_auth")
+            .request_timeout(Duration::from_millis(100)),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    let mut events = runtime.subscribe();
+
+    let close_runtime = runtime.clone();
+    let close_session_id = session.session_id.clone();
+    let close = tokio::spawn(async move {
+        close_runtime
+            .execute(RuntimeCommand::CloseSession {
+                session_id: close_session_id,
+            })
+            .await
+    });
+    loop {
+        if matches!(
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("close-start event timed out")
+                .expect("runtime event channel should remain open"),
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Cancelling,
+            } if session_id == &session.session_id
+        ) {
+            break;
+        }
+    }
+    let error = runtime
+        .execute(RuntimeCommand::Prompt {
+            session_id: session.session_id.clone(),
+            text: "A closing session must stay blocked.".to_owned(),
+        })
+        .await
+        .expect_err("close-in-progress must reject a concurrent prompt");
+    assert_eq!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+    let error = close
+        .await
+        .expect("close task should join")
+        .expect_err("fixture close should time out");
+    assert_eq!(error.code, grok_runtime::RuntimeErrorCode::RequestTimedOut);
+    loop {
+        if matches!(
+            tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("ambiguous close event timed out")
+                .expect("runtime event channel should remain open"),
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Failed,
+            } if session_id == &session.session_id
+        ) {
+            break;
+        }
+    }
+    let error = runtime
+        .execute(RuntimeCommand::Prompt {
+            session_id: session.session_id.clone(),
+            text: "An uncertain session must stay blocked.".to_owned(),
+        })
+        .await
+        .expect_err("ambiguous close must remain fail-closed");
+    assert_eq!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+    let RuntimeResponse::Session(reactivated) = runtime
+        .execute(RuntimeCommand::LoadSession {
+            session_id: session.session_id.clone(),
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("explicit load should reactivate the session")
+    else {
+        panic!("expected a reactivated session response");
+    };
+    assert_eq!(reactivated.session_id, session.session_id);
+    complete_first_fixture_prompt(&runtime, &reactivated.session_id).await;
     runtime.stop().await.expect("runtime should stop");
 }
 
@@ -612,16 +899,16 @@ async fn assert_state_sequence(
     expected: &[RuntimeState],
 ) {
     for expected_state in expected {
-        let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
-            .await
-            .expect("runtime event timed out")
-            .expect("runtime event channel closed");
-        assert_eq!(
-            event,
-            RuntimeEvent::RuntimeStateChanged {
-                state: *expected_state,
+        loop {
+            let event = tokio::time::timeout(Duration::from_secs(5), events.recv())
+                .await
+                .expect("runtime event timed out")
+                .expect("runtime event channel closed");
+            if let RuntimeEvent::RuntimeStateChanged { state } = event {
+                assert_eq!(state, *expected_state);
+                break;
             }
-        );
+        }
     }
 }
 

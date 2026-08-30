@@ -27,7 +27,9 @@ use agent_client_protocol::schema::{
 };
 #[cfg(not(windows))]
 use agent_client_protocol::{AcpAgent, AcpAgentConfig};
-use agent_client_protocol::{Agent, ConnectionTo, JsonRpcRequest, UntypedMessage};
+use agent_client_protocol::{
+    Agent, ConnectionTo, JsonRpcRequest, UntypedMessage, is_incoming_transport_closed,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
@@ -80,11 +82,20 @@ struct RuntimeShared {
     snapshot: RwLock<RuntimeSnapshot>,
     event_sender: broadcast::Sender<RuntimeEvent>,
     next_interaction_id: AtomicU64,
-    pending_permissions: Mutex<HashMap<String, PendingPermission>>,
-    pending_elicitations: Mutex<HashMap<String, PendingElicitation>>,
+    pending_permissions: StdMutex<HashMap<String, PendingPermission>>,
+    pending_elicitations: StdMutex<HashMap<String, PendingElicitation>>,
+    interaction_gate: StdMutex<InteractionGateState>,
     tool_calls: StdMutex<HashMap<(String, String), ToolPresentation>>,
     active_prompts: RwLock<BTreeSet<String>>,
     session_controls: StdMutex<HashMap<String, RuntimeSessionControls>>,
+}
+
+#[derive(Default)]
+struct InteractionGateState {
+    runtime_stopping: bool,
+    cancelled_sessions: BTreeSet<String>,
+    closing_sessions: BTreeSet<String>,
+    unavailable_sessions: BTreeSet<String>,
 }
 
 struct PendingPermission {
@@ -511,8 +522,9 @@ impl GrokRuntime {
                 snapshot: RwLock::new(RuntimeSnapshot::default()),
                 event_sender,
                 next_interaction_id: AtomicU64::new(1),
-                pending_permissions: Mutex::new(HashMap::new()),
-                pending_elicitations: Mutex::new(HashMap::new()),
+                pending_permissions: StdMutex::new(HashMap::new()),
+                pending_elicitations: StdMutex::new(HashMap::new()),
+                interaction_gate: StdMutex::new(InteractionGateState::default()),
                 tool_calls: StdMutex::new(HashMap::new()),
                 active_prompts: RwLock::new(BTreeSet::new()),
                 session_controls: StdMutex::new(HashMap::new()),
@@ -606,7 +618,11 @@ impl GrokRuntime {
         interaction_id: &str,
         decision: PermissionDecision,
     ) -> Result<(), RuntimeError> {
-        let mut pending = self.shared.pending_permissions.lock().await;
+        let mut pending = self
+            .shared
+            .pending_permissions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(advertised) = pending.get(interaction_id) else {
             return Err(runtime_error(
                 RuntimeErrorCode::UnknownInteraction,
@@ -645,7 +661,11 @@ impl GrokRuntime {
         interaction_id: &str,
         decision: ElicitationDecision,
     ) -> Result<(), RuntimeError> {
-        let mut pending = self.shared.pending_elicitations.lock().await;
+        let mut pending = self
+            .shared
+            .pending_elicitations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let Some(advertised) = pending.get(interaction_id) else {
             return Err(runtime_error(
                 RuntimeErrorCode::UnknownInteraction,
@@ -668,6 +688,7 @@ impl GrokRuntime {
     }
 
     async fn start_inner(&self) -> Result<RuntimeSnapshot, RuntimeError> {
+        self.shared.allow_runtime_interactions();
         self.shared.transition(RuntimeState::Connecting);
         let (commands, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
         let (ready_tx, ready_rx) = oneshot::channel();
@@ -707,6 +728,17 @@ impl GrokRuntime {
 }
 
 impl RuntimeShared {
+    fn allow_runtime_interactions(&self) {
+        let mut gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.runtime_stopping = false;
+        gate.cancelled_sessions.clear();
+        gate.closing_sessions.clear();
+        gate.unavailable_sessions.clear();
+    }
+
     fn transition(&self, state: RuntimeState) {
         let changed = {
             let mut snapshot = self
@@ -808,6 +840,82 @@ impl RuntimeShared {
         format!("{prefix}-{sequence}")
     }
 
+    fn register_permission(
+        &self,
+        session_id: String,
+        interaction_id: String,
+        options: BTreeMap<PermissionDecision, String>,
+        event: RuntimeEvent,
+    ) -> Option<oneshot::Receiver<RequestPermissionResponse>> {
+        let gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if gate.runtime_stopping
+            || gate.cancelled_sessions.contains(&session_id)
+            || gate.closing_sessions.contains(&session_id)
+            || gate.unavailable_sessions.contains(&session_id)
+        {
+            return None;
+        }
+        let (response_tx, response_rx) = oneshot::channel();
+        self.pending_permissions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                interaction_id,
+                PendingPermission {
+                    session_id: session_id.clone(),
+                    options,
+                    response: response_tx,
+                },
+            );
+        self.transition(RuntimeState::WaitingForInput);
+        self.session_state(&session_id, SessionState::WaitingForInput);
+        self.emit(event);
+        Some(response_rx)
+    }
+
+    fn register_elicitation(
+        &self,
+        session_id: Option<String>,
+        interaction_id: String,
+        kind: ElicitationKind,
+        event: RuntimeEvent,
+    ) -> Option<oneshot::Receiver<CreateElicitationResponse>> {
+        let gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if gate.runtime_stopping
+            || session_id.as_ref().is_some_and(|session_id| {
+                gate.cancelled_sessions.contains(session_id)
+                    || gate.closing_sessions.contains(session_id)
+                    || gate.unavailable_sessions.contains(session_id)
+            })
+        {
+            return None;
+        }
+        let (response_tx, response_rx) = oneshot::channel();
+        self.pending_elicitations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(
+                interaction_id,
+                PendingElicitation {
+                    session_id: session_id.clone(),
+                    kind,
+                    response: response_tx,
+                },
+            );
+        self.transition(RuntimeState::WaitingForInput);
+        if let Some(session_id) = &session_id {
+            self.session_state(session_id, SessionState::WaitingForInput);
+        }
+        self.emit(event);
+        Some(response_rx)
+    }
+
     fn begin_prompt(&self, session_id: &str) -> Result<(), RuntimeError> {
         let mut active = self
             .active_prompts
@@ -819,6 +927,29 @@ impl RuntimeShared {
                 "another prompt is already active",
                 true,
             ));
+        }
+        {
+            let mut gate = self
+                .interaction_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            if gate.runtime_stopping {
+                return Err(runtime_error(
+                    RuntimeErrorCode::RuntimeStopped,
+                    "runtime is stopping",
+                    true,
+                ));
+            }
+            if gate.closing_sessions.contains(session_id)
+                || gate.unavailable_sessions.contains(session_id)
+            {
+                return Err(runtime_error(
+                    RuntimeErrorCode::InvalidRequest,
+                    "session must be loaded or resumed before prompting",
+                    true,
+                ));
+            }
+            gate.cancelled_sessions.remove(session_id);
         }
         active.insert(session_id.to_owned());
         drop(active);
@@ -836,7 +967,17 @@ impl RuntimeShared {
             active.remove(session_id);
             active.is_empty()
         };
-        self.session_state(session_id, SessionState::Ready);
+        let lifecycle_blocked = {
+            let gate = self
+                .interaction_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            gate.closing_sessions.contains(session_id)
+                || gate.unavailable_sessions.contains(session_id)
+        };
+        if !lifecycle_blocked {
+            self.session_state(session_id, SessionState::Ready);
+        }
         if none_active {
             self.transition(RuntimeState::Ready);
         }
@@ -1045,18 +1186,11 @@ impl RuntimeShared {
             return RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
         };
         let session_id = request.session_id.to_string();
-        let (response_tx, response_rx) = oneshot::channel();
-        self.pending_permissions.lock().await.insert(
-            interaction_id.clone(),
-            PendingPermission {
-                session_id: session_id.clone(),
-                options,
-                response: response_tx,
-            },
-        );
-        self.transition(RuntimeState::WaitingForInput);
-        self.session_state(&session_id, SessionState::WaitingForInput);
-        self.emit(event);
+        let Some(response_rx) =
+            self.register_permission(session_id.clone(), interaction_id, options, event)
+        else {
+            return RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled);
+        };
         let response = response_rx.await.unwrap_or_else(|_| {
             RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
         });
@@ -1080,25 +1214,17 @@ impl RuntimeShared {
         let Some(kind) = normalize_elicitation_kind(&request.mode) else {
             return self.deny_unsupported_elicitation();
         };
-        let (response_tx, response_rx) = oneshot::channel();
-        self.pending_elicitations.lock().await.insert(
-            interaction_id.clone(),
-            PendingElicitation {
-                session_id: session_id.clone(),
-                kind: kind.clone(),
-                response: response_tx,
-            },
-        );
-        self.transition(RuntimeState::WaitingForInput);
-        if let Some(session_id) = &session_id {
-            self.session_state(session_id, SessionState::WaitingForInput);
-        }
-        self.emit(RuntimeEvent::ElicitationRequested {
+        let event = RuntimeEvent::ElicitationRequested {
             session_id: session_id.clone(),
-            interaction_id,
+            interaction_id: interaction_id.clone(),
             prompt,
-            kind,
-        });
+            kind: kind.clone(),
+        };
+        let Some(response_rx) =
+            self.register_elicitation(session_id.clone(), interaction_id, kind, event)
+        else {
+            return CreateElicitationResponse::new(ElicitationAction::Cancel);
+        };
         let response = response_rx
             .await
             .unwrap_or_else(|_| CreateElicitationResponse::new(ElicitationAction::Cancel));
@@ -1119,6 +1245,19 @@ impl RuntimeShared {
     }
 
     fn restore_after_interaction(&self, session_id: &str) {
+        let interactions_cancelled = {
+            let gate = self
+                .interaction_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            gate.runtime_stopping
+                || gate.cancelled_sessions.contains(session_id)
+                || gate.closing_sessions.contains(session_id)
+                || gate.unavailable_sessions.contains(session_id)
+        };
+        if interactions_cancelled {
+            return;
+        }
         let active = self
             .active_prompts
             .read()
@@ -1131,6 +1270,73 @@ impl RuntimeShared {
             self.transition(RuntimeState::Ready);
             self.session_state(session_id, SessionState::Ready);
         }
+    }
+
+    fn restore_after_failed_close(&self, session_id: &str) {
+        {
+            let mut gate = self
+                .interaction_gate
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            gate.cancelled_sessions.remove(session_id);
+            gate.closing_sessions.remove(session_id);
+        }
+        let (target_active, none_active) = {
+            let active = self
+                .active_prompts
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            (active.contains(session_id), active.is_empty())
+        };
+        if target_active {
+            self.session_state(session_id, SessionState::Working);
+            self.transition(RuntimeState::Working);
+        } else {
+            self.session_state(session_id, SessionState::Ready);
+            if none_active {
+                self.transition(RuntimeState::Ready);
+            }
+        }
+    }
+
+    fn mark_session_unavailable(&self, session_id: &str, state: SessionState) {
+        let mut gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.cancelled_sessions.remove(session_id);
+        gate.closing_sessions.remove(session_id);
+        gate.unavailable_sessions.insert(session_id.to_owned());
+        drop(gate);
+        self.session_state(session_id, state);
+    }
+
+    fn begin_session_close(&self, session_id: &str) -> Result<(), RuntimeError> {
+        let mut gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if gate.closing_sessions.contains(session_id)
+            || gate.unavailable_sessions.contains(session_id)
+        {
+            return Err(runtime_error(
+                RuntimeErrorCode::InvalidRequest,
+                "session must be loaded or resumed before this operation",
+                true,
+            ));
+        }
+        gate.closing_sessions.insert(session_id.to_owned());
+        Ok(())
+    }
+
+    fn activate_session(&self, session_id: &str) {
+        let mut gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.cancelled_sessions.remove(session_id);
+        gate.closing_sessions.remove(session_id);
+        gate.unavailable_sessions.remove(session_id);
     }
 
     fn handle_extension_notification(&self, notification: UntypedMessage) {
@@ -1216,49 +1422,84 @@ impl RuntimeShared {
     }
 
     async fn cancel_session_interactions(&self, session_id: &str) {
-        let permission_ids = self
-            .pending_permissions
+        let mut gate = self
+            .interaction_gate
             .lock()
-            .await
-            .iter()
-            .filter(|(_, pending)| pending.session_id == session_id)
-            .map(|(interaction_id, _)| interaction_id.clone())
-            .collect::<Vec<_>>();
-        let elicitation_ids = self
-            .pending_elicitations
-            .lock()
-            .await
-            .iter()
-            .filter(|(_, pending)| pending.session_id.as_deref() == Some(session_id))
-            .map(|(interaction_id, _)| interaction_id.clone())
-            .collect::<Vec<_>>();
-
-        let mut permissions = self.pending_permissions.lock().await;
-        for interaction_id in permission_ids {
-            if let Some(pending) = permissions.remove(&interaction_id) {
-                let _ = pending.response.send(RequestPermissionResponse::new(
-                    RequestPermissionOutcome::Cancelled,
-                ));
-            }
-        }
-        drop(permissions);
-        let mut elicitations = self.pending_elicitations.lock().await;
-        for interaction_id in elicitation_ids {
-            if let Some(pending) = elicitations.remove(&interaction_id) {
-                let _ = pending
-                    .response
-                    .send(CreateElicitationResponse::new(ElicitationAction::Cancel));
-            }
-        }
-    }
-
-    async fn cancel_pending_interactions(&self) {
-        for (_, pending) in self.pending_permissions.lock().await.drain() {
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.cancelled_sessions.insert(session_id.to_owned());
+        self.session_state(session_id, SessionState::Cancelling);
+        let permissions = {
+            let mut pending = self
+                .pending_permissions
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let ids = pending
+                .iter()
+                .filter(|(_, pending)| pending.session_id == session_id)
+                .map(|(interaction_id, _)| interaction_id.clone())
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|interaction_id| pending.remove(&interaction_id))
+                .collect::<Vec<_>>()
+        };
+        let elicitations = {
+            let mut pending = self
+                .pending_elicitations
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            let ids = pending
+                .iter()
+                .filter(|(_, pending)| pending.session_id.as_deref() == Some(session_id))
+                .map(|(interaction_id, _)| interaction_id.clone())
+                .collect::<Vec<_>>();
+            ids.into_iter()
+                .filter_map(|interaction_id| pending.remove(&interaction_id))
+                .collect::<Vec<_>>()
+        };
+        self.emit(RuntimeEvent::InteractionsCleared {
+            session_id: Some(session_id.to_owned()),
+        });
+        drop(gate);
+        for pending in permissions {
             let _ = pending.response.send(RequestPermissionResponse::new(
                 RequestPermissionOutcome::Cancelled,
             ));
         }
-        for (_, pending) in self.pending_elicitations.lock().await.drain() {
+        for pending in elicitations {
+            let _ = pending
+                .response
+                .send(CreateElicitationResponse::new(ElicitationAction::Cancel));
+        }
+    }
+
+    async fn cancel_pending_interactions(&self) {
+        let mut gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.runtime_stopping = true;
+        let permissions = self
+            .pending_permissions
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .drain()
+            .map(|(_, pending)| pending)
+            .collect::<Vec<_>>();
+        let elicitations = self
+            .pending_elicitations
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .drain()
+            .map(|(_, pending)| pending)
+            .collect::<Vec<_>>();
+        self.emit(RuntimeEvent::InteractionsCleared { session_id: None });
+        drop(gate);
+        for pending in permissions {
+            let _ = pending.response.send(RequestPermissionResponse::new(
+                RequestPermissionOutcome::Cancelled,
+            ));
+        }
+        for pending in elicitations {
             let _ = pending
                 .response
                 .send(CreateElicitationResponse::new(ElicitationAction::Cancel));
@@ -1365,25 +1606,20 @@ fn normalize_permission_request(
         .unwrap_or_else(|| "Permission requested".to_owned());
     let kind = permission_kind(&request.tool_call)?;
     let mut options = BTreeMap::new();
-    let mut can_persist_decision = false;
+    let mut available_decisions = Vec::new();
     for option in request.options.iter().take(16) {
         let decision = match option.kind {
             PermissionOptionKind::AllowOnce => PermissionDecision::AllowOnce,
-            PermissionOptionKind::AllowAlways => {
-                can_persist_decision = true;
-                PermissionDecision::AllowAlways
-            }
+            PermissionOptionKind::AllowAlways => PermissionDecision::AllowAlways,
             PermissionOptionKind::RejectOnce => PermissionDecision::DenyOnce,
-            PermissionOptionKind::RejectAlways => {
-                can_persist_decision = true;
-                PermissionDecision::DenyAlways
-            }
+            PermissionOptionKind::RejectAlways => PermissionDecision::DenyAlways,
             _ => continue,
         };
         let option_id = validate_exact_interaction_text(option.option_id.0.as_ref(), 256)?;
         if options.insert(decision, option_id).is_some() {
             return None;
         }
+        available_decisions.push(decision);
     }
     if options.is_empty() {
         return None;
@@ -1396,7 +1632,7 @@ fn normalize_permission_request(
             title,
             consequence: permission_consequence(&request.tool_call),
             kind,
-            can_persist_decision,
+            available_decisions,
         },
         options,
     ))
@@ -1944,14 +2180,15 @@ async fn execute_command(
             )
             .await?;
             let session_id = validate_session_id(response.session_id.to_string())?;
-            shared.session_state(&session_id, SessionState::Ready);
             let session = normalize_runtime_session(
-                session_id,
+                session_id.clone(),
                 response.modes.as_ref(),
                 response.config_options.as_deref(),
                 normalize_serializable_session_response(&response),
             )?;
+            shared.activate_session(&session_id);
             shared.remember_session_controls(&session);
+            shared.session_state(&session_id, SessionState::Ready);
             Ok(RuntimeResponse::Session(session))
         }
         RuntimeCommand::ListSessions { workspace, cursor } => {
@@ -1973,22 +2210,37 @@ async fn execute_command(
             require_capability(capabilities.sessions.load, "session loading")?;
             let session_id = validate_session_id(session_id)?;
             let workspace = canonicalize_workspace(workspace)?;
-            let response = timeout_request(
-                request_timeout,
-                connection
-                    .send_request(LoadSessionRequest::new(session_id.clone(), workspace))
-                    .block_task(),
-            )
-            .await?;
-            shared.session_state(&session_id, SessionState::Ready);
-            let session = normalize_runtime_session(
-                session_id,
-                response.modes.as_ref(),
-                response.config_options.as_deref(),
-                normalize_serializable_session_response(&response),
-            )?;
-            shared.remember_session_controls(&session);
-            Ok(RuntimeResponse::Session(session))
+            shared.emit(RuntimeEvent::SessionActivated {
+                session_id: session_id.clone(),
+            });
+            let result = async {
+                let response = timeout_request(
+                    request_timeout,
+                    connection
+                        .send_request(LoadSessionRequest::new(session_id.clone(), workspace))
+                        .block_task(),
+                )
+                .await?;
+                let session = normalize_runtime_session(
+                    session_id.clone(),
+                    response.modes.as_ref(),
+                    response.config_options.as_deref(),
+                    normalize_serializable_session_response(&response),
+                )?;
+                shared.activate_session(&session_id);
+                shared.remember_session_controls(&session);
+                Ok(RuntimeResponse::Session(session))
+            }
+            .await;
+            shared.session_state(
+                &session_id,
+                if result.is_ok() {
+                    SessionState::Ready
+                } else {
+                    SessionState::Failed
+                },
+            );
+            result
         }
         RuntimeCommand::ResumeSession {
             session_id,
@@ -1997,34 +2249,79 @@ async fn execute_command(
             require_capability(capabilities.sessions.resume, "session resuming")?;
             let session_id = validate_session_id(session_id)?;
             let workspace = canonicalize_workspace(workspace)?;
-            let response = timeout_request(
-                request_timeout,
-                connection
-                    .send_request(ResumeSessionRequest::new(session_id.clone(), workspace))
-                    .block_task(),
-            )
-            .await?;
-            shared.session_state(&session_id, SessionState::Ready);
-            let session = normalize_runtime_session(
-                session_id,
-                response.modes.as_ref(),
-                response.config_options.as_deref(),
-                normalize_serializable_session_response(&response),
-            )?;
-            shared.remember_session_controls(&session);
-            Ok(RuntimeResponse::Session(session))
+            shared.emit(RuntimeEvent::SessionActivated {
+                session_id: session_id.clone(),
+            });
+            let result = async {
+                let response = timeout_request(
+                    request_timeout,
+                    connection
+                        .send_request(ResumeSessionRequest::new(session_id.clone(), workspace))
+                        .block_task(),
+                )
+                .await?;
+                let session = normalize_runtime_session(
+                    session_id.clone(),
+                    response.modes.as_ref(),
+                    response.config_options.as_deref(),
+                    normalize_serializable_session_response(&response),
+                )?;
+                shared.activate_session(&session_id);
+                shared.remember_session_controls(&session);
+                Ok(RuntimeResponse::Session(session))
+            }
+            .await;
+            shared.session_state(
+                &session_id,
+                if result.is_ok() {
+                    SessionState::Ready
+                } else {
+                    SessionState::Failed
+                },
+            );
+            result
         }
         RuntimeCommand::CloseSession { session_id } => {
             require_capability(capabilities.sessions.close, "session closing")?;
             let session_id = validate_session_id(session_id)?;
-            timeout_request(
+            shared.begin_session_close(&session_id)?;
+            shared.cancel_session_interactions(&session_id).await;
+            let _ = connection.send_notification(CancelNotification::new(session_id.clone()));
+            match tokio::time::timeout(
                 request_timeout,
                 connection
                     .send_request(CloseSessionRequest::new(session_id.clone()))
                     .block_task(),
             )
-            .await?;
-            shared.session_state(&session_id, SessionState::Closed);
+            .await
+            {
+                Ok(Ok(_)) => {}
+                Ok(Err(error)) if !is_incoming_transport_closed(&error) => {
+                    shared.restore_after_failed_close(&session_id);
+                    return Err(runtime_error(
+                        RuntimeErrorCode::ProtocolRequestFailed,
+                        "runtime rejected session closing",
+                        true,
+                    ));
+                }
+                Ok(Err(_)) => {
+                    shared.mark_session_unavailable(&session_id, SessionState::Failed);
+                    return Err(runtime_error(
+                        RuntimeErrorCode::ConnectionFailed,
+                        "session close outcome is unknown after connection loss",
+                        true,
+                    ));
+                }
+                Err(_) => {
+                    shared.mark_session_unavailable(&session_id, SessionState::Failed);
+                    return Err(runtime_error(
+                        RuntimeErrorCode::RequestTimedOut,
+                        "session close outcome is unknown after timeout",
+                        true,
+                    ));
+                }
+            }
+            shared.mark_session_unavailable(&session_id, SessionState::Closed);
             shared
                 .session_controls
                 .lock()
@@ -2139,7 +2436,6 @@ async fn execute_command(
         }
         RuntimeCommand::Cancel { session_id } => {
             let session_id = validate_session_id(session_id)?;
-            shared.session_state(&session_id, SessionState::Cancelling);
             shared.cancel_session_interactions(&session_id).await;
             connection
                 .send_notification(CancelNotification::new(session_id))

@@ -4,7 +4,7 @@
 
 ```text
 React
-  <-> typed Tauri commands + `grok-runtime-event`
+  <-> narrow Tauri commands + `grok-application-event`
 one Tauri-managed `GrokRuntime`
   <-> private worker actor + normalized state
 Windows Job Object-contained ACP process
@@ -13,7 +13,7 @@ Windows Job Object-contained ACP process
 
 ## Public boundary
 
-Callers can discover/start/stop/restart the runtime, read its snapshot, execute a `RuntimeCommand`, subscribe to `RuntimeEvent`, and answer a GUI-owned permission or elicitation interaction ID. The command surface covers session creation, listing, load/resume, prompt, cancellation, close, and advertised mode/model/configuration changes.
+The native application core can discover/start/stop/restart the runtime, read its snapshot, execute a `RuntimeCommand`, subscribe to `RuntimeEvent`, and answer a GUI-owned permission or elicitation interaction ID. Tauri maps that internal interface to operation-specific application commands; the generic enums are not React inputs. The reviewed application contract is documented in [the application contract note](application-contract.md).
 
 Responses and events contain bounded application data: negotiated capabilities, sanitized session summaries, streamed text and thought chunks, tool state, exact validated permission scope, elicitation forms, plans, usage supplied by the runtime, lifecycle state, safe standard metadata, normalized `x.ai/*` extension updates, and redacted diagnostics.
 
