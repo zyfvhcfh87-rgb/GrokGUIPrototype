@@ -13,7 +13,7 @@ tokio.workspace = true
 
 [dev-dependencies]
 grok-acp-probe = { path = "../grok-acp-probe" }
-grok-runtime.workspace = true
+grok-runtime = { workspace = true, features = ["test-support"] }
 tempfile.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]

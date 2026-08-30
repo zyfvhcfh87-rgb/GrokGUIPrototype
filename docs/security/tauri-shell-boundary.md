@@ -1,6 +1,6 @@
 # Tauri shell security boundary
 
-Issue #6 establishes a deliberately small desktop boundary. The shell renders the packaged React application and grants the webview no filesystem, process, dialog, external-link, network, or general Tauri IPC permissions.
+Issue #6 establishes a deliberately small desktop boundary, and issue #7 adds one reviewed application-specific bridge through it. The shell renders the packaged React application and grants the webview no filesystem, process, dialog, external-link, network, or broad plugin permissions.
 
 ## Trust boundary
 
@@ -8,7 +8,8 @@ Issue #6 establishes a deliberately small desktop boundary. The shell renders th
 packaged React assets
     -> one local Tauri webview (`main`)
     -> empty capability permission set
-    -> no native access plugins or application commands
+    -> typed `GrokRuntime` application commands and normalized events
+    -> no native access plugins
 ```
 
 - Production content comes only from `../dist`; the main window URL is the local `index.html` entry point.
@@ -17,7 +18,9 @@ packaged React assets
 - `withGlobalTauri` and the asset protocol are disabled.
 - No remote origin is attached to a capability. The `main-shell` capability is local, targets only the `main` window, and starts with an empty permission list.
 - Tauri's compile-time CSP rewriting remains enabled, and the production policy permits no remote script, style, font, frame, form, object, image, or network source.
-- The Rust crate registers no application commands and initializes no plugins. The frontend therefore cannot reach the filesystem, spawn processes, show native dialogs, or open external URLs.
+- The Rust crate registers only lifecycle, domain-command, and interaction-response operations for `GrokRuntime`; it initializes no plugins. The bridge accepts no raw JSON-RPC payload, executable path, launch argument, credential, native handle, or unrestricted filesystem operation.
+- Tauri application commands are available to local application windows by default. This application defines only the packaged `main` window and attaches no remote origin. Adding another window or any remote content requires a new boundary review before it may reach these commands.
+- The service owns the contained Grok child process. React cannot spawn arbitrary processes, show native dialogs, open external URLs, or access Grok credential and session files.
 
 ## Expanding access safely
 
@@ -26,7 +29,7 @@ Future issues may add native operations only when the workflow needs them. Each 
 1. expose a narrow application command rather than a broad plugin permission;
 2. validate paths, URLs, and request scope in Rust;
 3. return a bounded presentation DTO instead of native handles or raw diagnostics;
-4. add only the exact capability permission needed by the `main` window;
+4. add only the exact capability permission needed by the `main` window and review application-command exposure before adding another window;
 5. extend `tests/security-boundary.test.mjs` with the expected permission and explicit denials; and
 6. document user-visible consequences and fail-closed behavior.
 
@@ -50,4 +53,4 @@ Launch the Windows development shell with:
 npm run tauri dev
 ```
 
-The security test fails if a remote production URL appears, the capability gains a permission, the asset protocol or dangerous CSP bypass is enabled, or a broad native-access plugin is introduced.
+The security test fails if a remote production URL appears, the capability gains a core or plugin permission, the asset protocol or dangerous CSP bypass is enabled, a broad native-access plugin is introduced, or the runtime bridge starts depending on ACP method names, raw payloads, transport IDs, or child-process commands.

@@ -3,14 +3,18 @@ use std::{fmt, path::PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
-use crate::RedactedDiagnostic;
+use crate::{
+    AnnouncementBatch, GrokSettings, KnownExtensionMalformed, McpUpdate, ModelCatalog,
+    PromptCompletion, PromptQueueState, RedactedDiagnostic, RuntimeConfigOption, SessionChanges,
+    SessionExtensionUpdate,
+};
 
 /// Application-facing events produced by a Grok runtime adapter.
 ///
 /// These are normalized presentation facts, not ACP envelopes. In particular,
 /// an unknown extension retains only a fixed observation marker; its untrusted
 /// raw method name and payload are never represented here.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum RuntimeEvent {
     RuntimeStateChanged {
@@ -19,6 +23,11 @@ pub enum RuntimeEvent {
     SessionStateChanged {
         session_id: String,
         state: SessionState,
+    },
+    UserMessageChunkReceived {
+        session_id: String,
+        message_id: Option<String>,
+        text: String,
     },
     MessageChunkReceived {
         session_id: String,
@@ -40,15 +49,15 @@ pub enum RuntimeEvent {
     },
     PermissionRequested {
         session_id: String,
-        request_id: String,
+        interaction_id: String,
         title: String,
         consequence: Option<String>,
         kind: PermissionKind,
         can_persist_decision: bool,
     },
     ElicitationRequested {
-        session_id: String,
-        request_id: String,
+        session_id: Option<String>,
+        interaction_id: String,
         prompt: String,
         kind: ElicitationKind,
     },
@@ -60,9 +69,33 @@ pub enum RuntimeEvent {
         session_id: String,
         usage: Usage,
     },
+    SessionMetadataChanged {
+        session_id: String,
+        kind: SessionMetadataKind,
+    },
+    AvailableCommandsChanged {
+        session_id: String,
+        commands: Vec<RuntimeAvailableCommand>,
+    },
+    SessionModeChanged {
+        session_id: String,
+        current_mode_id: String,
+    },
+    SessionConfigOptionsChanged {
+        session_id: String,
+        config_options: Vec<RuntimeConfigOption>,
+    },
+    SessionInfoChanged {
+        session_id: String,
+        title: RuntimeOptionalUpdate<String>,
+        updated_at: RuntimeOptionalUpdate<String>,
+    },
     RuntimeFailed {
         diagnostic: RedactedDiagnostic,
         recoverable: bool,
+    },
+    RuntimeExtensionChanged {
+        update: RuntimeExtensionUpdate,
     },
     ExtensionMethodObserved {
         session_id: Option<String>,
@@ -116,8 +149,43 @@ pub enum ActivityStatus {
     Cancelled,
 }
 
-/// Exact permission scope shown to the user. Unknown request shapes collapse
-/// to `Other` rather than retaining their raw payload.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+#[serde(tag = "type", content = "value", rename_all = "snake_case")]
+pub enum RuntimeExtensionUpdate {
+    Models(ModelCatalog),
+    Settings(GrokSettings),
+    Sessions(SessionChanges),
+    Queue(PromptQueueState),
+    PromptCompletion(PromptCompletion),
+    Session(Box<SessionExtensionUpdate>),
+    Announcements(AnnouncementBatch),
+    Mcp(McpUpdate),
+    Malformed(KnownExtensionMalformed),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SessionMetadataKind {
+    Other,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+pub struct RuntimeAvailableCommand {
+    pub name: String,
+    pub description: String,
+    pub accepts_input: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(tag = "state", content = "value", rename_all = "snake_case")]
+pub enum RuntimeOptionalUpdate<T> {
+    NotReported,
+    Cleared,
+    Value(T),
+}
+
+/// Exact permission scope shown to the user. Requests that cannot be projected
+/// without ambiguity are declined before an event is created.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum PermissionKind {
@@ -143,11 +211,18 @@ pub enum PermissionKind {
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ElicitationKind {
     Text {
+        field_id: String,
+        label: Option<String>,
         placeholder: Option<String>,
         sensitive: bool,
     },
-    Confirmation,
+    Confirmation {
+        field_id: String,
+        label: Option<String>,
+    },
     Choice {
+        field_id: String,
+        label: Option<String>,
         options: Vec<String>,
         multiple: bool,
     },
@@ -281,7 +356,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn representative_events_round_trip_through_json() {
+    fn representative_events_serialize_without_sensitive_diagnostics() {
         let events = vec![
             RuntimeEvent::RuntimeStateChanged {
                 state: RuntimeState::Ready,
@@ -289,6 +364,11 @@ mod tests {
             RuntimeEvent::SessionStateChanged {
                 session_id: "session-1".into(),
                 state: SessionState::Working,
+            },
+            RuntimeEvent::UserMessageChunkReceived {
+                session_id: "session-1".into(),
+                message_id: Some("message-user-1".into()),
+                text: "hello".into(),
             },
             RuntimeEvent::MessageChunkReceived {
                 session_id: "session-1".into(),
@@ -310,7 +390,7 @@ mod tests {
             },
             RuntimeEvent::PermissionRequested {
                 session_id: "session-1".into(),
-                request_id: "permission-1".into(),
+                interaction_id: "permission-1".into(),
                 title: "Run tests".into(),
                 consequence: Some("May create build artifacts".into()),
                 kind: PermissionKind::Command {
@@ -320,10 +400,12 @@ mod tests {
                 can_persist_decision: false,
             },
             RuntimeEvent::ElicitationRequested {
-                session_id: "session-1".into(),
-                request_id: "elicitation-1".into(),
+                session_id: Some("session-1".into()),
+                interaction_id: "elicitation-1".into(),
                 prompt: "Pick one".into(),
                 kind: ElicitationKind::Choice {
+                    field_id: "answer".into(),
+                    label: Some("Answer".into()),
                     options: vec!["A".into(), "B".into()],
                     multiple: false,
                 },
@@ -344,6 +426,10 @@ mod tests {
                     ..Usage::default()
                 },
             },
+            RuntimeEvent::SessionMetadataChanged {
+                session_id: "session-1".into(),
+                kind: SessionMetadataKind::Other,
+            },
             RuntimeEvent::RuntimeFailed {
                 diagnostic: RedactedDiagnostic::new("api_key=runtime-secret"),
                 recoverable: true,
@@ -352,8 +438,6 @@ mod tests {
 
         for event in events {
             let encoded = serde_json::to_string(&event).unwrap();
-            let decoded: RuntimeEvent = serde_json::from_str(&encoded).unwrap();
-            assert_eq!(decoded, event);
             assert!(!encoded.contains("tool-secret"));
             assert!(!encoded.contains("runtime-secret"));
         }
@@ -375,13 +459,7 @@ mod tests {
 
     #[test]
     fn invalid_extension_method_is_rejected_during_deserialization() {
-        let encoded = r#"{
-            "type":"extension_method_observed",
-            "session_id":null,
-            "method":"x.ai/future method"
-        }"#;
-
-        let error = serde_json::from_str::<RuntimeEvent>(encoded).unwrap_err();
+        let error = serde_json::from_str::<ExtensionMethod>(r#""x.ai/future method""#).unwrap_err();
 
         assert!(error.to_string().contains("unsupported character"));
     }
