@@ -1,6 +1,7 @@
 [workspace]
 members = [
   "crates/grok-runtime",
+  "src-tauri",
   "tools/grok-acp-probe",
   "tools/fake-acp-agent",
 ]

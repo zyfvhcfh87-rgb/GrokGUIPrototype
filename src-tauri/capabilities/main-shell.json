@@ -1,0 +1,8 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-shell",
+  "description": "The local main window starts with no Tauri IPC permissions. Future access must be granted one reviewed command at a time.",
+  "local": true,
+  "windows": ["main"],
+  "permissions": []
+}

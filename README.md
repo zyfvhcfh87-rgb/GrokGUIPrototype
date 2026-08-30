@@ -4,7 +4,9 @@ A local-first desktop cockpit for Grok Build. The product architecture and safet
 
 ## Current status
 
-The Phase 0 compatibility spike is substantially complete. This workspace intentionally starts with a Rust harness before the Tauri and React application shell. The harness verifies the installed Grok binary against ACP v1, records sanitized fixtures, and establishes reusable process, wire-summary, and normalization components inside `grok-runtime`. Lifecycle orchestration remains in the probe crate; Phase 1 will assemble those components behind the long-lived `GrokRuntime` interface and expose typed Tauri commands and events. Phase 0 closes by classifying each expected behavior as installed-runtime evidence, deterministic fake coverage, version-specific behavior, unsupported behavior, or an explicit unknown. Exhaustive safety and lifecycle permutations belong to Phase 2. The installed-runtime unknowns retained after the spike are tracked in [the Phase 0 evidence report](docs/compatibility/phase-0-evidence.md#installed-runtime-unknowns-retained-after-phase-0).
+The Phase 0 compatibility spike is complete, and Phase 1 begins with a Tauri 2, React, TypeScript, and Vite application shell. The harness verifies the installed Grok binary against ACP v1, records sanitized fixtures, and establishes reusable process, wire-summary, and normalization components inside `grok-runtime`. The desktop shell deliberately has no native access commands or plugins yet; its local-content, capability, and Content Security Policy boundary is documented in [the Tauri shell security note](docs/security/tauri-shell-boundary.md).
+
+Lifecycle orchestration remains in the probe crate until the long-lived `GrokRuntime` service is assembled. Later Phase 1 work will expose reviewed typed Tauri commands and normalized events without leaking protocol details into React. The installed-runtime unknowns retained after the spike are tracked in [the Phase 0 evidence report](docs/compatibility/phase-0-evidence.md#installed-runtime-unknowns-retained-after-phase-0).
 
 Nothing in the compatibility suite reads Grok credential files. Live authentication and session probes are explicit opt-in commands.
 
@@ -33,6 +35,19 @@ cargo run -p grok-acp-probe -- managed-restart --workspace .
 cargo test --workspace
 ```
 
+## Desktop shell commands
+
+Install the project-local frontend and Tauri CLI dependencies once, then run the checks or launch the Windows development application:
+
+```powershell
+npm install
+npm test
+npm run build
+npm run tauri dev
+```
+
+`npm run tauri build -- --no-bundle` verifies the production desktop build without producing an installer. Keep the existing Rust workspace green with `cargo check --workspace --all-targets` and `cargo test --workspace --all-targets`.
+
 The live lifecycle creates and closes a persisted Grok session and sends model prompts. The control probe creates and closes a separate persisted session with the already advertised model/reasoning values, repeats those values as a no-op, and restores session mode from `plan` to `default`; it sends no prompt and does not touch global permission policy. The managed restart probe creates one persisted zero-turn session, deliberately drops the first Job Object-contained process, then discovers, resumes, and closes that exact session from a fresh contained process. These probes never delete their closed sessions afterward. `managed-initialize` uses an isolated home and creates no session.
 
 On Windows, the implementation routes `initialize`, `lifecycle`, and `controls` through the same Job Object-contained process adapter rather than the SDK's direct-child launcher. The dedicated managed initialize and restart commands provide installed-runtime containment evidence, and final ordinary initialize and zero-turn control runs also completed through that shared adapter with no malformed or dropped frames, stderr output, or remaining Grok processes. The authenticated prompt lifecycle transcript was not rerun solely to re-prove launcher selection after this routing change, so its containment claim rests on the shared adapter path plus the independent process-tree tests. The separate managed commands remain explicit containment and restart diagnostics.
@@ -40,6 +55,9 @@ On Windows, the implementation routes `initialize`, `lifecycle`, and `controls` 
 ## Workspace layout
 
 - `crates/grok-runtime`: reusable runtime boundary, diagnostics, and normalized events.
+- `src`: strict React and TypeScript interface loaded from packaged local assets.
+- `src-tauri`: minimal Tauri 2 desktop crate, restrictive CSP, and empty initial capability.
+- `tests`: executable security-boundary checks for the desktop scaffold.
 - `tools/grok-acp-probe`: opt-in compatibility and evidence CLI.
 - `tools/fake-acp-agent`: deterministic child-process test adapter.
 - `fixtures/acp`: sanitized ACP transcripts used by contract tests.

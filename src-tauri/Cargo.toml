@@ -1,0 +1,17 @@
+[package]
+name = "grok-build-gui"
+version = "0.1.0"
+description = "A local-first desktop cockpit for Grok Build"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lib]
+name = "grok_build_gui_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.5", features = [] }

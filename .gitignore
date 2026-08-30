@@ -7,4 +7,6 @@
 !.env.example
 node_modules/
 dist/
+/src-tauri/gen/schemas/
+*.tsbuildinfo
 
