@@ -1530,8 +1530,10 @@ dependencies = [
 name = "grok-build-gui"
 version = "0.1.0"
 dependencies = [
+ "grok-runtime",
  "tauri",
  "tauri-build",
+ "tokio",
 ]
 
 [[package]]

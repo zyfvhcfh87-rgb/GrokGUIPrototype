@@ -4,9 +4,9 @@ A local-first desktop cockpit for Grok Build. The product architecture and safet
 
 ## Current status
 
-The Phase 0 compatibility spike is complete, and Phase 1 begins with a Tauri 2, React, TypeScript, and Vite application shell. The harness verifies the installed Grok binary against ACP v1, records sanitized fixtures, and establishes reusable process, wire-summary, and normalization components inside `grok-runtime`. The desktop shell deliberately has no native access commands or plugins yet; its local-content, capability, and Content Security Policy boundary is documented in [the Tauri shell security note](docs/security/tauri-shell-boundary.md).
+The Phase 0 compatibility spike is complete, and Phase 1 now has a Tauri 2, React, TypeScript, and Vite application shell plus the long-lived `GrokRuntime` service. The harness verifies the installed Grok binary against ACP v1, records sanitized fixtures, and establishes reusable process, wire-summary, normalization, and lifecycle components inside `grok-runtime`. The desktop shell exposes only the service's typed domain commands and events; it has no broad native-access plugins. Its local-content, capability, and Content Security Policy boundary is documented in [the Tauri shell security note](docs/security/tauri-shell-boundary.md).
 
-Lifecycle orchestration remains in the probe crate until the long-lived `GrokRuntime` service is assembled. Later Phase 1 work will expose reviewed typed Tauri commands and normalized events without leaking protocol details into React. The installed-runtime unknowns retained after the spike are tracked in [the Phase 0 evidence report](docs/compatibility/phase-0-evidence.md#installed-runtime-unknowns-retained-after-phase-0).
+`GrokRuntime` now owns executable discovery, the contained ACP child, initialization and authentication, negotiated capabilities, session commands, interactions, cancellation, recovery, and normalized event delivery. The Tauri process keeps one service instance for the lifetime of the application. Protocol framing and IDs, credentials, executable arguments, and child-process details remain private to the runtime crate; see [the service architecture note](docs/architecture/grok-runtime-service.md). The installed-runtime unknowns retained after the spike are tracked in [the Phase 0 evidence report](docs/compatibility/phase-0-evidence.md#installed-runtime-unknowns-retained-after-phase-0).
 
 Nothing in the compatibility suite reads Grok credential files. Live authentication and session probes are explicit opt-in commands.
 
@@ -54,9 +54,9 @@ On Windows, the implementation routes `initialize`, `lifecycle`, and `controls` 
 
 ## Workspace layout
 
-- `crates/grok-runtime`: reusable runtime boundary, diagnostics, and normalized events.
+- `crates/grok-runtime`: long-lived runtime service, process boundary, diagnostics, and normalized events.
 - `src`: strict React and TypeScript interface loaded from packaged local assets.
-- `src-tauri`: minimal Tauri 2 desktop crate, restrictive CSP, and empty initial capability.
+- `src-tauri`: minimal Tauri 2 desktop crate, restrictive CSP, and typed `GrokRuntime` bridge.
 - `tests`: executable security-boundary checks for the desktop scaffold.
 - `tools/grok-acp-probe`: opt-in compatibility and evidence CLI.
 - `tools/fake-acp-agent`: deterministic child-process test adapter.

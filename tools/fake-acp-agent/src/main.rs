@@ -216,6 +216,7 @@ fn serve_descendant_protocol() -> io::Result<()> {
         };
         match frame.get("method").and_then(Value::as_str) {
             Some("initialize") => write_frame(&mut output, initialize_response(id))?,
+            Some("authenticate") => write_frame(&mut output, result_response(id, json!({})))?,
             Some(_) => write_frame(
                 &mut output,
                 error_response(id, -32601, "Method unavailable in descendant fixture"),
@@ -357,7 +358,20 @@ fn run_lifecycle(
                 }
                 write_frame(
                     &mut output,
-                    result_response(id, json!({ "sessionId": SESSION_ID })),
+                    result_response(
+                        id,
+                        json!({
+                            "sessionId": SESSION_ID,
+                            "modes": {
+                                "currentModeId": "default",
+                                "availableModes": [
+                                    { "id": "default", "name": "Default" },
+                                    { "id": "plan", "name": "Plan" }
+                                ]
+                            },
+                            "configOptions": fixture_config_options(false)
+                        }),
+                    ),
                 )?;
                 if crash_after_new {
                     eprintln!("fake-acp-agent: deterministic post-session crash fixture");
@@ -471,6 +485,7 @@ fn run_lifecycle(
                     .and_then(Value::as_str)
                     == Some("high");
                 if valid_model && valid_effort {
+                    write_frame(&mut output, grok_models_notification())?;
                     write_frame(
                         &mut output,
                         grok_session_notification(json!({
@@ -497,11 +512,45 @@ fn run_lifecycle(
             "session/set_mode" if state.authenticated && state.session_open => {
                 let mode = frame.pointer("/params/modeId").and_then(Value::as_str);
                 if matches!(mode, Some("plan" | "default")) {
+                    write_frame(
+                        &mut output,
+                        session_update(json!({
+                            "sessionUpdate": "current_mode_update",
+                            "currentModeId": mode
+                        })),
+                    )?;
                     write_frame(&mut output, result_response(id, json!({})))?;
                 } else {
                     write_frame(
                         &mut output,
                         error_response(id, -32602, "Unsupported fixture session mode"),
+                    )?;
+                }
+            }
+            "session/set_config_option" if state.authenticated && state.session_open => {
+                let valid = frame.pointer("/params/configId").and_then(Value::as_str)
+                    == Some("fixture-toggle")
+                    && frame.pointer("/params/type").and_then(Value::as_str) == Some("boolean")
+                    && frame.pointer("/params/value").and_then(Value::as_bool) == Some(true);
+                if valid {
+                    write_frame(
+                        &mut output,
+                        session_update(json!({
+                            "sessionUpdate": "config_option_update",
+                            "configOptions": fixture_config_options(true)
+                        })),
+                    )?;
+                    write_frame(
+                        &mut output,
+                        result_response(
+                            id,
+                            json!({ "configOptions": fixture_config_options(true) }),
+                        ),
+                    )?;
+                } else {
+                    write_frame(
+                        &mut output,
+                        error_response(id, -32602, "Unsupported fixture config option"),
                     )?;
                 }
             }
@@ -962,6 +1011,15 @@ fn initialize_response(id: Value) -> Value {
     })
 }
 
+fn fixture_config_options(current_value: bool) -> Value {
+    json!([{
+        "id": "fixture-toggle",
+        "name": "Fixture toggle",
+        "type": "boolean",
+        "currentValue": current_value
+    }])
+}
+
 fn result_response(id: Value, result: Value) -> Value {
     json!({ "jsonrpc": "2.0", "id": id, "result": result })
 }
@@ -992,6 +1050,29 @@ fn grok_session_notification(update: Value) -> Value {
         "params": {
             "sessionId": SESSION_ID,
             "update": update
+        }
+    })
+}
+
+fn grok_models_notification() -> Value {
+    json!({
+        "jsonrpc": "2.0",
+        "method": "_x.ai/models/update",
+        "params": {
+            "currentModelId": "fixture-model",
+            "availableModels": [{
+                "modelId": "fixture-model",
+                "name": "Fixture Model",
+                "reasoningEffort": "high",
+                "reasoningEfforts": [{
+                    "id": "high",
+                    "label": "High",
+                    "value": "high",
+                    "isDefault": true
+                }],
+                "supportsReasoningEffort": true,
+                "totalContextTokens": 4096
+            }]
         }
     })
 }

@@ -20,7 +20,7 @@ test("the desktop window loads only local production assets", async () => {
   assert.deepEqual(config.plugins, {});
 });
 
-test("the initial capability grants no system or IPC permissions", async () => {
+test("the main capability grants no core or plugin permissions", async () => {
   const capability = await readJson("src-tauri/capabilities/main-shell.json");
 
   assert.equal(capability.local, true);
@@ -58,6 +58,19 @@ test("the scaffold does not include native access plugins", async () => {
     manifests,
     /(?:@tauri-apps\/plugin-|tauri-plugin-)(?:dialog|fs|http|opener|os|process|shell|upload|websocket)/u,
   );
+});
+
+test("the desktop bridge exposes only normalized GrokRuntime commands and events", async () => {
+  const bridge = await readProjectFile("src-tauri/src/lib.rs");
+
+  assert.match(bridge, /RuntimeCommand/u);
+  assert.match(bridge, /RuntimeEvent/u);
+  assert.match(bridge, /\.manage\(RuntimeManager/u);
+  assert.match(bridge, /\.invoke_handler\(tauri::generate_handler!/u);
+  assert.match(bridge, /emit\(RUNTIME_EVENT_NAME, event\)/u);
+  assert.match(bridge, /RecvError::Lagged/u);
+  assert.doesNotMatch(bridge, /session\/(?:new|list|load|resume|prompt|cancel|close|set_)/u);
+  assert.doesNotMatch(bridge, /serde_json::Value|JsonRpc|request_id|grok agent stdio/u);
 });
 
 test("the development server does not watch Rust build outputs", async () => {

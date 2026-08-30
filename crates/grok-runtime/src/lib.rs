@@ -9,6 +9,7 @@ mod event;
 mod executable;
 mod grok_extension;
 mod grok_session_response;
+mod runtime;
 #[cfg(windows)]
 mod windows_process;
 mod wire_summary;
@@ -16,7 +17,8 @@ mod wire_summary;
 pub use diagnostic::{RedactedDiagnostic, redact_diagnostic};
 pub use event::{
     ActivityStatus, ElicitationKind, ExtensionMethod, InvalidExtensionMethod, PermissionKind,
-    PlanEntry, PlanEntryStatus, RuntimeEvent, RuntimeState, SessionState, ToolCallKind, Usage,
+    PlanEntry, PlanEntryStatus, RuntimeAvailableCommand, RuntimeEvent, RuntimeExtensionUpdate,
+    RuntimeOptionalUpdate, RuntimeState, SessionMetadataKind, SessionState, ToolCallKind, Usage,
 };
 pub use executable::{
     GROK_PATH_ENV, GROK_STDIO_ARGS, GrokExecutableSource, ResolveGrokExecutableError,
@@ -33,6 +35,16 @@ pub use grok_extension::{
 };
 pub use grok_session_response::{
     GrokSessionConfigOption, GrokSessionResponse, SafeResponseKeys, normalize_grok_session_response,
+};
+#[cfg(feature = "test-support")]
+pub use runtime::RuntimeTestTarget;
+pub use runtime::{
+    AuthenticationMethod, ElicitationDecision, ElicitationValue, GrokRuntime, PermissionDecision,
+    RuntimeAgent, RuntimeCapabilities, RuntimeCommand, RuntimeConfigChoice, RuntimeConfigKind,
+    RuntimeConfigOption, RuntimeConfigValue, RuntimeError, RuntimeErrorCode, RuntimeMode,
+    RuntimeModes, RuntimePromptStopReason, RuntimeResponse, RuntimeSession,
+    RuntimeSessionCapabilities, RuntimeSessionControls, RuntimeSessionPage, RuntimeSessionSummary,
+    RuntimeSnapshot,
 };
 #[cfg(windows)]
 pub use windows_process::{ProcessDiagnosticSnapshot, ProcessDiagnostics, WindowsAcpProcess};
