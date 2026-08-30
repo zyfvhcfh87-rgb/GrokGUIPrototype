@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Grok Build GUI mark">
+  <defs>
+    <linearGradient id="surface" x1="72" y1="56" x2="440" y2="456" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9AA8FF" />
+      <stop offset="0.52" stop-color="#6373E8" />
+      <stop offset="1" stop-color="#3540A5" />
+    </linearGradient>
+    <linearGradient id="spark" x1="192" y1="159" x2="324" y2="351" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFFFFF" />
+      <stop offset="1" stop-color="#D8DDFF" />
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="128" fill="#11131B" />
+  <rect x="36" y="36" width="440" height="440" rx="108" fill="url(#surface)" />
+  <path d="M154 166c0-20 16-36 36-36h132c20 0 36 16 36 36v180c0 20-16 36-36 36H190c-20 0-36-16-36-36V166Z" fill="#121521" fill-opacity=".92" />
+  <path d="M202 218h108M202 256h70M202 294h108" stroke="url(#spark)" stroke-width="22" stroke-linecap="round" />
+  <circle cx="336" cy="176" r="36" fill="#C7CEFF" />
+  <path d="m336 154 6 16 16 6-16 6-6 16-6-16-16-6 16-6 6-16Z" fill="#4B59C6" />
+</svg>
