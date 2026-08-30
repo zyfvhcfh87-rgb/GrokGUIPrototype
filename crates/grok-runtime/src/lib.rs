@@ -40,9 +40,9 @@ pub use grok_session_response::{
 pub use runtime::RuntimeTestTarget;
 pub use runtime::{
     AuthenticationMethod, ElicitationDecision, ElicitationValue, GrokRuntime, PermissionDecision,
-    RuntimeAgent, RuntimeCapabilities, RuntimeCommand, RuntimeConfigChoice, RuntimeConfigKind,
-    RuntimeConfigOption, RuntimeConfigValue, RuntimeError, RuntimeErrorCode, RuntimeMode,
-    RuntimeModes, RuntimePromptStopReason, RuntimeResponse, RuntimeSession,
+    RuntimeAgent, RuntimeAgentProduct, RuntimeCapabilities, RuntimeCommand, RuntimeConfigChoice,
+    RuntimeConfigKind, RuntimeConfigOption, RuntimeConfigValue, RuntimeError, RuntimeErrorCode,
+    RuntimeMode, RuntimeModes, RuntimePromptStopReason, RuntimeResponse, RuntimeSession,
     RuntimeSessionCapabilities, RuntimeSessionControls, RuntimeSessionPage, RuntimeSessionSummary,
     RuntimeSnapshot,
 };

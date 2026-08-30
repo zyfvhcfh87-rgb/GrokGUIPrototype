@@ -60,17 +60,49 @@ test("the scaffold does not include native access plugins", async () => {
   );
 });
 
-test("the desktop bridge exposes only normalized GrokRuntime commands and events", async () => {
+test("the desktop bridge exposes only reviewed application commands and events", async () => {
   const bridge = await readProjectFile("src-tauri/src/lib.rs");
+  const contract = await readProjectFile(
+    "src-tauri/src/application_contract.rs",
+  );
+  const productionContract = contract.split("#[cfg(test)]", 1)[0];
 
-  assert.match(bridge, /RuntimeCommand/u);
-  assert.match(bridge, /RuntimeEvent/u);
-  assert.match(bridge, /\.manage\(RuntimeManager/u);
+  for (const command of [
+    "setup_status",
+    "workspace_validate",
+    "runtime_snapshot",
+    "runtime_start",
+    "runtime_stop",
+    "runtime_restart",
+    "session_new",
+    "session_list",
+    "session_load",
+    "session_resume",
+    "session_close",
+    "prompt_send",
+    "prompt_cancel",
+    "session_set_mode",
+    "session_set_model",
+    "session_set_config",
+    "permission_respond",
+    "elicitation_respond",
+  ]) {
+    assert.match(bridge, new RegExp(`(?:async )?fn ${command}\\b`, "u"));
+  }
+  assert.match(contract, /pub enum ApplicationEvent/u);
+  assert.match(contract, /pub struct ApplicationEventEnvelope/u);
+  assert.match(contract, /pub struct ApplicationEventClock/u);
+  assert.match(bridge, /\.manage\(manager\)/u);
   assert.match(bridge, /\.invoke_handler\(tauri::generate_handler!/u);
-  assert.match(bridge, /emit\(RUNTIME_EVENT_NAME, event\)/u);
+  assert.match(bridge, /emit\(APPLICATION_EVENT_NAME, envelope\)/u);
   assert.match(bridge, /RecvError::Lagged/u);
+  assert.doesNotMatch(bridge, /async fn runtime_execute\b/u);
+  assert.doesNotMatch(contract, /pub (?:enum|struct) (?:RuntimeCommand|RuntimeResponse)/u);
   assert.doesNotMatch(bridge, /session\/(?:new|list|load|resume|prompt|cancel|close|set_)/u);
-  assert.doesNotMatch(bridge, /serde_json::Value|JsonRpc|request_id|grok agent stdio/u);
+  assert.doesNotMatch(
+    `${bridge}\n${productionContract}`,
+    /serde_json::Value|JsonRpc|request_id|grok agent stdio|auth\.json|stderr/u,
+  );
 });
 
 test("the development server does not watch Rust build outputs", async () => {

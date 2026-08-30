@@ -3,6 +3,7 @@ use std::{fmt, path::PathBuf};
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use thiserror::Error;
 
+use crate::runtime::PermissionDecision;
 use crate::{
     AnnouncementBatch, GrokSettings, KnownExtensionMalformed, McpUpdate, ModelCatalog,
     PromptCompletion, PromptQueueState, RedactedDiagnostic, RuntimeConfigOption, SessionChanges,
@@ -23,6 +24,9 @@ pub enum RuntimeEvent {
     SessionStateChanged {
         session_id: String,
         state: SessionState,
+    },
+    SessionActivated {
+        session_id: String,
     },
     UserMessageChunkReceived {
         session_id: String,
@@ -53,13 +57,16 @@ pub enum RuntimeEvent {
         title: String,
         consequence: Option<String>,
         kind: PermissionKind,
-        can_persist_decision: bool,
+        available_decisions: Vec<PermissionDecision>,
     },
     ElicitationRequested {
         session_id: Option<String>,
         interaction_id: String,
         prompt: String,
         kind: ElicitationKind,
+    },
+    InteractionsCleared {
+        session_id: Option<String>,
     },
     PlanChanged {
         session_id: String,
@@ -365,6 +372,9 @@ mod tests {
                 session_id: "session-1".into(),
                 state: SessionState::Working,
             },
+            RuntimeEvent::SessionActivated {
+                session_id: "session-1".into(),
+            },
             RuntimeEvent::UserMessageChunkReceived {
                 session_id: "session-1".into(),
                 message_id: Some("message-user-1".into()),
@@ -397,7 +407,10 @@ mod tests {
                     command: "cargo test".into(),
                     working_directory: Some(PathBuf::from("workspace")),
                 },
-                can_persist_decision: false,
+                available_decisions: vec![
+                    PermissionDecision::AllowOnce,
+                    PermissionDecision::DenyOnce,
+                ],
             },
             RuntimeEvent::ElicitationRequested {
                 session_id: Some("session-1".into()),
@@ -409,6 +422,9 @@ mod tests {
                     options: vec!["A".into(), "B".into()],
                     multiple: false,
                 },
+            },
+            RuntimeEvent::InteractionsCleared {
+                session_id: Some("session-1".into()),
             },
             RuntimeEvent::PlanChanged {
                 session_id: "session-1".into(),

@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "check": "tsc -b --pretty false",
-    "test": "node --test tests/security-boundary.test.mjs",
+    "test": "node --test tests/*.test.mjs",
     "build": "npm run check && vite build",
     "preview": "vite preview",
     "tauri": "tauri"

@@ -1531,8 +1531,11 @@ name = "grok-build-gui"
 version = "0.1.0"
 dependencies = [
  "grok-runtime",
+ "serde",
+ "serde_json",
  "tauri",
  "tauri-build",
+ "tempfile",
  "tokio",
 ]
 
