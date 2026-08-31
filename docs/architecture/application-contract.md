@@ -1,20 +1,20 @@
 # Application contract
 
-Issue #8 defines the reviewed interface between the native application core and React. The Tauri layer translates narrow user intents into `GrokRuntime` commands and projects runtime output into bounded application DTOs. React never receives the generic runtime command enum or any ACP, JSON-RPC, process, credential, or stderr representation.
+Issue #8 defines the reviewed interface between the native application core and React. Issue #9 adds the setup and workspace workflow without widening that interface into general native access. The Tauri layer translates narrow user intents into `GrokRuntime` commands and projects runtime output into bounded application DTOs. React never receives the generic runtime command enum or any ACP, JSON-RPC, process, credential, or stderr representation.
 
 ## Commands
 
 The desktop exposes only these command groups:
 
-- setup and workspace: `setup_status`, `workspace_validate`;
+- setup and workspace: `setup_status`, `workspace_pick`, `workspace_validate`, `workspace_recent_list`, `workspace_recent_remove`;
 - runtime lifecycle: `runtime_snapshot`, `runtime_start`, `runtime_stop`, `runtime_restart`;
 - sessions: `session_new`, `session_list`, `session_load`, `session_resume`, `session_close`;
 - turns and controls: `prompt_send`, `prompt_cancel`, `session_set_mode`, `session_set_model`, `session_set_config`;
 - interactions: `permission_respond`, `elicitation_respond`.
 
-Each command accepts one reviewed request DTO when input is required and returns one operation-specific DTO. Workspace validation canonicalizes an existing directory in Rust. Runtime errors become bounded application errors with a fixed code, redacted diagnostic, and recoverability flag.
+Each command accepts one reviewed request DTO when input is required and returns one operation-specific DTO. `setup_status` reports a fixed executable state and discovery source without exposing the executable path. `workspace_pick` owns the Windows native folder dialog in Rust and returns only a canonical validated directory. Workspace validation rejects missing, non-directory, oversized, and control-bearing values before use. The versioned recent-workspace store is capped at eight entries, preserves unavailable entries for explicit removal, and contains no session or credential data. A preference read or write failure becomes a bounded warning without preventing an otherwise valid workspace selection. Runtime and preference errors become bounded application errors with a fixed code, redacted diagnostic, and recoverability flag.
 
-The TypeScript `createApplicationBridge` module mirrors this interface without depending on Tauri internals. A later composition layer supplies the official Tauri invoke/listen adapter; tests use an in-memory adapter through the same interface.
+The TypeScript `createApplicationBridge` module mirrors this interface without depending on Tauri internals. The application composition root supplies the official Tauri invoke/listen adapter; tests use an in-memory adapter through the same interface. The setup controller subscribes before it inspects or starts the runtime, then feeds every envelope through the shared deterministic reducer before projecting setup state. Connecting and authenticating transitions cannot be lost, duplicated, or regressed by stale delivery during launch.
 
 ## Events and ordering
 
@@ -42,4 +42,4 @@ Known Grok extensions cross the seam only as typed invalidation areas and an opt
 
 The reviewed wire inventory lives in `fixtures/application-contract-manifest.json`. Rust serialization fixtures and TypeScript contract constants both verify its command list, event tags and fields, request/response and nested DTO fields, enum wire values, and event channel. TypeScript field/value and tagged-union declarations are compile-time exhaustive over their corresponding types. Rust contract changes must update the reviewed serialization inventory and both parity gates together.
 
-Rust tests cover every application event variant's JSON round trip, UTF-8 and collection bounds, event clock generations, workspace validation, request validation, permission safety, extension collapse, and shared-manifest parity. Frontend tests cover command routing, event subscription, every structured reducer state, resolved interactions, out-of-order delivery, duplicates, stale session events, explicit reactivation, restart transitions, and store publication.
+Rust tests cover every application event variant's JSON round trip, UTF-8 and collection bounds, event clock generations, workspace validation and recent persistence, request validation, advertised authentication selection, permission safety, extension collapse, and shared-manifest parity. Frontend tests cover command routing, event subscription, setup and workspace empty/error states, every structured reducer state, resolved interactions, out-of-order delivery, duplicates, stale session events, explicit reactivation, restart transitions, and store publication.

@@ -20,12 +20,15 @@ test("the desktop window loads only local production assets", async () => {
   assert.deepEqual(config.plugins, {});
 });
 
-test("the main capability grants no core or plugin permissions", async () => {
+test("the main capability grants only event subscription permissions", async () => {
   const capability = await readJson("src-tauri/capabilities/main-shell.json");
 
   assert.equal(capability.local, true);
   assert.deepEqual(capability.windows, ["main"]);
-  assert.deepEqual(capability.permissions, []);
+  assert.deepEqual(capability.permissions, [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+  ]);
   assert.equal(Object.hasOwn(capability, "remote"), false);
 });
 
@@ -69,7 +72,10 @@ test("the desktop bridge exposes only reviewed application commands and events",
 
   for (const command of [
     "setup_status",
+    "workspace_pick",
     "workspace_validate",
+    "workspace_recent_list",
+    "workspace_recent_remove",
     "runtime_snapshot",
     "runtime_start",
     "runtime_stop",

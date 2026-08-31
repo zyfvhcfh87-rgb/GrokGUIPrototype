@@ -20,5 +20,8 @@ serde_json.workspace = true
 tauri = { version = "=2.11.5", features = [] }
 tokio.workspace = true
 
+[target.'cfg(windows)'.dependencies]
+rfd = { version = "=0.16.0", default-features = false }
+
 [dev-dependencies]
 tempfile.workspace = true

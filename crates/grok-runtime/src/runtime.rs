@@ -43,9 +43,9 @@ use crate::WindowsAcpProcess;
 use crate::{
     ActivityStatus, ElicitationKind, GROK_STDIO_ARGS, GrokExtensionOutcome, GrokSessionResponse,
     ModelCatalog, PermissionKind, PlanEntry, PlanEntryStatus, RedactedDiagnostic,
-    RuntimeAvailableCommand, RuntimeEvent, RuntimeExtensionUpdate, RuntimeOptionalUpdate,
-    RuntimeState, SessionMetadataKind, SessionState, ToolCallKind, Usage, normalize_grok_extension,
-    normalize_grok_session_response, resolve_grok_executable,
+    ResolvedGrokExecutable, RuntimeAvailableCommand, RuntimeEvent, RuntimeExtensionUpdate,
+    RuntimeOptionalUpdate, RuntimeState, SessionMetadataKind, SessionState, ToolCallKind, Usage,
+    normalize_grok_extension, normalize_grok_session_response, resolve_grok_executable,
 };
 
 const DEFAULT_REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
@@ -494,13 +494,20 @@ impl GrokRuntime {
             recoverable: true,
         })?;
 
-        Ok(Self::from_target(RuntimeTarget {
+        Ok(Self::from_resolved_executable(executable))
+    }
+
+    /// Build a runtime from an executable that has already passed the shared
+    /// discovery and canonicalization boundary.
+    #[must_use]
+    pub fn from_resolved_executable(executable: ResolvedGrokExecutable) -> Self {
+        Self::from_target(RuntimeTarget {
             executable: executable.into_path(),
             arguments: GROK_STDIO_ARGS.iter().map(ToString::to_string).collect(),
             environment: Vec::new(),
             auth_method: None,
             request_timeout: DEFAULT_REQUEST_TIMEOUT,
-        }))
+        })
     }
 
     #[cfg(feature = "test-support")]
@@ -2951,7 +2958,31 @@ fn runtime_error(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use agent_client_protocol::schema::v1::{AuthMethod, AuthMethodAgent};
     use serde_json::json;
+
+    #[test]
+    fn authentication_uses_only_bounded_advertised_methods() {
+        let advertised = InitializeResponse::new(ProtocolVersion::V1).auth_methods(vec![
+            auth_method("private-auth", "Private"),
+            auth_method("grok.com", "Grok web"),
+            auth_method("cached_token", "Cached token"),
+        ]);
+
+        assert_eq!(
+            choose_auth_method(&advertised, None).as_deref(),
+            Some("cached_token")
+        );
+        assert_eq!(
+            choose_auth_method(&advertised, Some("grok.com")).as_deref(),
+            Some("grok.com")
+        );
+        assert!(choose_auth_method(&advertised, Some("not-advertised")).is_none());
+
+        let unknown_only = InitializeResponse::new(ProtocolVersion::V1)
+            .auth_methods(vec![auth_method("private-auth", "Private")]);
+        assert!(choose_auth_method(&unknown_only, None).is_none());
+    }
 
     #[test]
     fn execute_permissions_without_an_absolute_working_directory_fail_closed() {
@@ -3024,6 +3055,10 @@ mod tests {
         assert!(validate_elicitation_decision(&kind, &invalid_field).is_err());
         assert!(validate_elicitation_decision(&kind, &invalid_choice).is_err());
         assert!(validate_elicitation_decision(&kind, &valid_choice).is_ok());
+    }
+
+    fn auth_method(id: &str, name: &str) -> AuthMethod {
+        AuthMethod::Agent(AuthMethodAgent::new(id.to_owned(), name.to_owned()))
     }
 
     #[test]

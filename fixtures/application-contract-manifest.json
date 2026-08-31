@@ -3,7 +3,10 @@
   "eventName": "grok-application-event",
   "commands": [
     "setup_status",
+    "workspace_pick",
     "workspace_validate",
+    "workspace_recent_list",
+    "workspace_recent_remove",
     "runtime_snapshot",
     "runtime_start",
     "runtime_stop",
@@ -26,6 +29,8 @@
     "applicationError": ["code", "diagnostic", "recoverable"],
     "workspaceRequest": ["path"],
     "workspace": ["path"],
+    "recentWorkspace": ["available", "path"],
+    "recentWorkspaceList": ["workspaces"],
     "newSessionRequest": ["workspace"],
     "listSessionsRequest": ["cursor", "workspace"],
     "sessionWorkspaceRequest": ["sessionId", "workspace"],
@@ -36,7 +41,7 @@
     "setSessionConfigRequest": ["configId", "sessionId", "value"],
     "permissionResponseRequest": ["decision", "interactionId"],
     "elicitationResponseRequest": ["decision", "interactionId"],
-    "setupStatus": ["failure", "runtimeAvailable"],
+    "setupStatus": ["executableSource", "executableState", "failure", "runtimeAvailable"],
     "acknowledgement": ["acknowledged"],
     "promptResult": ["stopReason"],
     "runtimeSnapshot": ["capabilities", "generation", "lastSequence", "state"],
@@ -108,11 +113,13 @@
     "runtimeExtensionArea": ["models", "settings", "sessions", "queue", "prompt_completion", "session", "announcements", "mcp", "malformed"],
     "authenticationMethod": ["cached_token", "grok_com", "xai_api_key", "grok", "other"],
     "runtimeAgentProduct": ["grok_build", "other"],
+    "executableState": ["available", "missing", "invalid"],
+    "executableSource": ["configured", "user_install", "path"],
     "promptStopReason": ["end_turn", "max_tokens", "max_turn_requests", "refusal", "cancelled", "other"],
     "planEntryStatus": ["pending", "in_progress", "completed"],
     "observedExtensionClassification": ["unknown", "invalid"],
     "interactionKind": ["permission", "elicitation"],
-    "applicationErrorCode": ["executable_unavailable", "process_start_failed", "connection_failed", "request_timed_out", "initialize_failed", "unsupported_protocol", "unsupported_authentication", "authentication_failed", "runtime_stopped", "invalid_workspace", "invalid_request", "capability_unavailable", "protocol_request_failed", "malformed_response", "unknown_interaction", "decision_unavailable", "unexpected_response", "boundary_violation"]
+    "applicationErrorCode": ["executable_unavailable", "process_start_failed", "connection_failed", "request_timed_out", "initialize_failed", "unsupported_protocol", "unsupported_authentication", "authentication_failed", "runtime_stopped", "invalid_workspace", "invalid_request", "capability_unavailable", "protocol_request_failed", "malformed_response", "unknown_interaction", "decision_unavailable", "unexpected_response", "boundary_violation", "preferences_unavailable"]
   },
   "events": {
     "runtime_state_changed": ["state"],

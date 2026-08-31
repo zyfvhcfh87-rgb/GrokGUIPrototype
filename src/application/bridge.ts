@@ -9,6 +9,7 @@ import {
   type PermissionResponseRequest,
   type PromptRequest,
   type PromptResult,
+  type RecentWorkspaceList,
   type RuntimeSnapshot,
   type Session,
   type SessionPage,
@@ -38,8 +39,16 @@ export function createApplicationBridge(transport: ApplicationTransport) {
 
   return {
     setupStatus: () => transport.invoke<SetupStatus>(APPLICATION_COMMANDS.setupStatus),
+    pickWorkspace: () => transport.invoke<Workspace | null>(APPLICATION_COMMANDS.pickWorkspace),
     validateWorkspace: (request: WorkspaceRequest) =>
       invoke<Workspace, WorkspaceRequest>(APPLICATION_COMMANDS.validateWorkspace, request),
+    listRecentWorkspaces: () =>
+      transport.invoke<RecentWorkspaceList>(APPLICATION_COMMANDS.listRecentWorkspaces),
+    removeRecentWorkspace: (request: WorkspaceRequest) =>
+      invoke<RecentWorkspaceList, WorkspaceRequest>(
+        APPLICATION_COMMANDS.removeRecentWorkspace,
+        request,
+      ),
     runtimeSnapshot: () =>
       transport.invoke<RuntimeSnapshot>(APPLICATION_COMMANDS.runtimeSnapshot),
     startRuntime: () => transport.invoke<RuntimeSnapshot>(APPLICATION_COMMANDS.startRuntime),
