@@ -1,8 +1,11 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "main-shell",
-  "description": "The local main window starts with no Tauri IPC permissions. Future access must be granted one reviewed command at a time.",
+  "description": "The local main window may subscribe to and unsubscribe from normalized application events. Native access remains behind reviewed Tauri commands.",
   "local": true,
   "windows": ["main"],
-  "permissions": []
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten"
+  ]
 }

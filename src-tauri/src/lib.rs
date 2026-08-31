@@ -1,30 +1,57 @@
 mod application_contract;
+mod workspace;
 
-use std::{sync::Arc, time::Duration};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use application_contract::{
     APPLICATION_EVENT_NAME, AcknowledgementDto, ApplicationErrorDto, ApplicationEvent,
-    ApplicationEventClock, ElicitationResponseRequestDto, InteractionKindDto,
-    ListSessionsRequestDto, NewSessionRequestDto, PermissionResponseRequestDto, PromptRequestDto,
-    PromptResultDto, RuntimeSnapshotDto, SessionDto, SessionPageDto, SessionRequestDto,
-    SessionWorkspaceRequestDto, SetSessionConfigRequestDto, SetSessionModeRequestDto,
-    SetSessionModelRequestDto, SetupStatusDto, WorkspaceDto, WorkspaceRequestDto,
-    acknowledgement_from_response, prompt_from_response, session_from_response,
-    sessions_from_response,
+    ApplicationEventClock, ElicitationResponseRequestDto, ExecutableSourceDto, ExecutableStateDto,
+    InteractionKindDto, ListSessionsRequestDto, NewSessionRequestDto, PermissionResponseRequestDto,
+    PromptRequestDto, PromptResultDto, RecentWorkspaceListDto, RuntimeSnapshotDto, SessionDto,
+    SessionPageDto, SessionRequestDto, SessionWorkspaceRequestDto, SetSessionConfigRequestDto,
+    SetSessionModeRequestDto, SetSessionModelRequestDto, SetupStatusDto, WorkspaceDto,
+    WorkspaceRequestDto, acknowledgement_from_response, prompt_from_response,
+    session_from_response, sessions_from_response,
 };
-use grok_runtime::{GrokRuntime, RedactedDiagnostic, RuntimeError, RuntimeEvent, RuntimeState};
-use tauri::Emitter as _;
+use grok_runtime::{
+    GrokRuntime, RedactedDiagnostic, ResolveGrokExecutableError, RuntimeError, RuntimeErrorCode,
+    RuntimeEvent, RuntimeState, resolve_grok_executable,
+};
+use tauri::{Emitter as _, Manager as _};
+
+use crate::workspace::WorkspaceStore;
 
 struct RuntimeManager {
     runtime: Result<GrokRuntime, RuntimeError>,
+    executable_state: ExecutableStateDto,
+    executable_source: Option<ExecutableSourceDto>,
     event_clock: Arc<ApplicationEventClock>,
     lifecycle: tokio::sync::Mutex<()>,
 }
 
 impl RuntimeManager {
     fn discover() -> Self {
+        let discovery = resolve_grok_executable(None);
+        let executable_state = match discovery.as_ref() {
+            Ok(_) => ExecutableStateDto::Available,
+            Err(ResolveGrokExecutableError::NotFound) => ExecutableStateDto::Missing,
+            Err(_) => ExecutableStateDto::Invalid,
+        };
+        let executable_source = discovery
+            .as_ref()
+            .ok()
+            .map(|executable| executable.source().into());
+        let runtime = discovery
+            .map(GrokRuntime::from_resolved_executable)
+            .map_err(|error| RuntimeError {
+                code: RuntimeErrorCode::ExecutableUnavailable,
+                diagnostic: RedactedDiagnostic::new(error.to_string()),
+                recoverable: true,
+            });
         Self {
-            runtime: GrokRuntime::discover(None),
+            runtime,
+            executable_state,
+            executable_source,
             event_clock: Arc::new(ApplicationEventClock::default()),
             lifecycle: tokio::sync::Mutex::new(()),
         }
@@ -65,6 +92,47 @@ impl RuntimeManager {
     }
 }
 
+struct WorkspaceManager {
+    store: std::sync::Mutex<WorkspaceStore>,
+}
+
+impl WorkspaceManager {
+    fn new(storage_path: PathBuf) -> Self {
+        Self {
+            store: std::sync::Mutex::new(WorkspaceStore::open(storage_path)),
+        }
+    }
+
+    fn select(&self, path: PathBuf) -> Result<WorkspaceDto, ApplicationErrorDto> {
+        let canonical = self
+            .store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .select(&path)
+            .map_err(ApplicationErrorDto::from)?;
+        WorkspaceDto::from_canonical_path(canonical)
+    }
+
+    fn recent(&self) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
+        let recent = self
+            .store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .recent()
+            .map_err(ApplicationErrorDto::from)?;
+        RecentWorkspaceListDto::from_recent(recent)
+    }
+
+    fn remove(&self, path: PathBuf) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
+        let mut store = self
+            .store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        store.remove(&path).map_err(ApplicationErrorDto::from)?;
+        RecentWorkspaceListDto::from_recent(store.recent().map_err(ApplicationErrorDto::from)?)
+    }
+}
+
 fn emit_application_event(
     app: &tauri::AppHandle,
     event_clock: &ApplicationEventClock,
@@ -88,18 +156,62 @@ fn setup_status(manager: tauri::State<'_, RuntimeManager>) -> SetupStatusDto {
     match manager.runtime.as_ref() {
         Ok(_) => SetupStatusDto {
             runtime_available: true,
+            executable_state: manager.executable_state,
+            executable_source: manager.executable_source,
             failure: None,
         },
         Err(error) => SetupStatusDto {
             runtime_available: false,
+            executable_state: manager.executable_state,
+            executable_source: manager.executable_source,
             failure: Some(error.clone().into()),
         },
     }
 }
 
 #[tauri::command]
-fn workspace_validate(request: WorkspaceRequestDto) -> Result<WorkspaceDto, ApplicationErrorDto> {
-    WorkspaceDto::validate(request)
+async fn workspace_pick(
+    window: tauri::Window,
+    manager: tauri::State<'_, WorkspaceManager>,
+) -> Result<Option<WorkspaceDto>, ApplicationErrorDto> {
+    #[cfg(windows)]
+    let selected = rfd::AsyncFileDialog::new()
+        .set_parent(&window)
+        .set_title("Choose a Grok Build workspace")
+        .pick_folder()
+        .await
+        .map(|handle| handle.path().to_path_buf());
+
+    #[cfg(not(windows))]
+    let selected: Option<PathBuf> = {
+        let _ = window;
+        return Err(ApplicationErrorDto::workspace_picker_unavailable());
+    };
+
+    selected.map(|path| manager.select(path)).transpose()
+}
+
+#[tauri::command]
+fn workspace_validate(
+    manager: tauri::State<'_, WorkspaceManager>,
+    request: WorkspaceRequestDto,
+) -> Result<WorkspaceDto, ApplicationErrorDto> {
+    manager.select(request.into_path()?)
+}
+
+#[tauri::command]
+fn workspace_recent_list(
+    manager: tauri::State<'_, WorkspaceManager>,
+) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
+    manager.recent()
+}
+
+#[tauri::command]
+fn workspace_recent_remove(
+    manager: tauri::State<'_, WorkspaceManager>,
+    request: WorkspaceRequestDto,
+) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
+    manager.remove(request.into_path()?)
 }
 
 #[tauri::command]
@@ -347,6 +459,8 @@ pub fn run() {
     tauri::Builder::default()
         .manage(manager)
         .setup(move |app| {
+            let preferences_path = app.path().app_config_dir()?.join("recent-workspaces.json");
+            app.manage(WorkspaceManager::new(preferences_path));
             if let Some(runtime) = event_source {
                 let mut events = runtime.subscribe();
                 let app_handle = app.handle().clone();
@@ -377,7 +491,10 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             setup_status,
+            workspace_pick,
             workspace_validate,
+            workspace_recent_list,
+            workspace_recent_remove,
             runtime_snapshot,
             runtime_start,
             runtime_stop,

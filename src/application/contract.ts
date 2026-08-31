@@ -2,7 +2,10 @@ export const APPLICATION_EVENT_NAME = "grok-application-event" as const;
 
 export const APPLICATION_COMMANDS = {
   setupStatus: "setup_status",
+  pickWorkspace: "workspace_pick",
   validateWorkspace: "workspace_validate",
+  listRecentWorkspaces: "workspace_recent_list",
+  removeRecentWorkspace: "workspace_recent_remove",
   runtimeSnapshot: "runtime_snapshot",
   startRuntime: "runtime_start",
   stopRuntime: "runtime_stop",
@@ -306,7 +309,8 @@ export type ApplicationErrorCode =
   | "unknown_interaction"
   | "decision_unavailable"
   | "unexpected_response"
-  | "boundary_violation";
+  | "boundary_violation"
+  | "preferences_unavailable";
 
 export type ApplicationError = {
   code: ApplicationErrorCode;
@@ -316,6 +320,8 @@ export type ApplicationError = {
 
 export type WorkspaceRequest = { path: string };
 export type Workspace = { path: string };
+export type RecentWorkspace = { path: string; available: boolean };
+export type RecentWorkspaceList = { workspaces: RecentWorkspace[] };
 export type NewSessionRequest = { workspace: string };
 export type ListSessionsRequest = {
   workspace: string | null;
@@ -371,6 +377,8 @@ export type ElicitationResponseRequest = {
 
 export type SetupStatus = {
   runtimeAvailable: boolean;
+  executableState: "available" | "missing" | "invalid";
+  executableSource: "configured" | "user_install" | "path" | null;
   failure: ApplicationError | null;
 };
 export type Acknowledgement = { acknowledged: boolean };
@@ -529,6 +537,8 @@ export const APPLICATION_DTO_FIELDS = {
   applicationError: fieldsOf<ApplicationError>()(["code", "diagnostic", "recoverable"]),
   workspaceRequest: fieldsOf<WorkspaceRequest>()(["path"]),
   workspace: fieldsOf<Workspace>()(["path"]),
+  recentWorkspace: fieldsOf<RecentWorkspace>()(["available", "path"]),
+  recentWorkspaceList: fieldsOf<RecentWorkspaceList>()(["workspaces"]),
   newSessionRequest: fieldsOf<NewSessionRequest>()(["workspace"]),
   listSessionsRequest: fieldsOf<ListSessionsRequest>()(["cursor", "workspace"]),
   sessionWorkspaceRequest: fieldsOf<SessionWorkspaceRequest>()(["sessionId", "workspace"]),
@@ -553,7 +563,12 @@ export const APPLICATION_DTO_FIELDS = {
     "decision",
     "interactionId",
   ]),
-  setupStatus: fieldsOf<SetupStatus>()(["failure", "runtimeAvailable"]),
+  setupStatus: fieldsOf<SetupStatus>()([
+    "executableSource",
+    "executableState",
+    "failure",
+    "runtimeAvailable",
+  ]),
   acknowledgement: fieldsOf<Acknowledgement>()(["acknowledged"]),
   promptResult: fieldsOf<PromptResult>()(["stopReason"]),
   runtimeSnapshot: fieldsOf<RuntimeSnapshot>()([
@@ -769,6 +784,16 @@ export const APPLICATION_ENUM_VALUES = {
     "other",
   ]),
   runtimeAgentProduct: valuesOf<RuntimeAgent["product"]>()(["grok_build", "other"]),
+  executableState: valuesOf<SetupStatus["executableState"]>()([
+    "available",
+    "missing",
+    "invalid",
+  ]),
+  executableSource: valuesOf<Exclude<SetupStatus["executableSource"], null>>()([
+    "configured",
+    "user_install",
+    "path",
+  ]),
   promptStopReason: valuesOf<PromptResult["stopReason"]>()([
     "end_turn",
     "max_tokens",
@@ -813,5 +838,6 @@ export const APPLICATION_ENUM_VALUES = {
     "decision_unavailable",
     "unexpected_response",
     "boundary_violation",
+    "preferences_unavailable",
   ]),
 } as const;

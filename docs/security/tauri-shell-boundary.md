@@ -1,13 +1,13 @@
 # Tauri shell security boundary
 
-Issue #6 establishes a deliberately small desktop boundary, issue #7 adds the long-lived runtime, and issue #8 narrows the React-facing interface to reviewed commands and bounded application events. The shell renders the packaged React application and grants the webview no filesystem, process, dialog, external-link, network, or broad plugin permissions.
+Issue #6 establishes a deliberately small desktop boundary, issue #7 adds the long-lived runtime, issue #8 narrows the React-facing interface to reviewed commands and bounded application events, and issue #9 adds setup and workspace selection behind that same boundary. The shell renders the packaged React application and grants the webview no filesystem, process, dialog, external-link, network, or broad plugin permissions.
 
 ## Trust boundary
 
 ```text
 packaged React assets
     -> one local Tauri webview (`main`)
-    -> empty capability permission set
+    -> event listen/unlisten capability only
     -> reviewed application DTOs and `grok-application-event`
     -> private `GrokRuntime` command and event enums
     -> no native access plugins
@@ -17,12 +17,13 @@ packaged React assets
 - Development uses the loopback-only Vite server at `127.0.0.1:1420`. It is the sole development CSP exception and is not present in the production CSP.
 - Vite excludes `src-tauri` and the shared Cargo `target` directory from its watcher so Rust rebuilds cannot trigger frontend reloads or collide with locked Windows build artifacts.
 - `withGlobalTauri` and the asset protocol are disabled.
-- No remote origin is attached to a capability. The `main-shell` capability is local, targets only the `main` window, and starts with an empty permission list.
+- No remote origin is attached to a capability. The `main-shell` capability is local, targets only the `main` window, and grants only `core:event:allow-listen` and `core:event:allow-unlisten` for the normalized application event channel.
 - Tauri's compile-time CSP rewriting remains enabled, and the production policy permits no remote script, style, font, frame, form, object, image, or network source.
 - The Rust crate registers only setup/workspace, lifecycle, session, turn/control, and interaction-response operations; it initializes no plugins. The generic runtime command enum is not a Tauri input. The bridge accepts no raw JSON-RPC payload, executable path, launch argument, credential, native handle, or unrestricted filesystem operation.
 - Runtime events are projected to bounded application DTOs and wrapped in a generation plus sequence before emission. Unknown extension method names and payloads are discarded rather than forwarded.
 - Tauri application commands are available to local application windows by default. This application defines only the packaged `main` window and attaches no remote origin. Adding another window or any remote content requires a new boundary review before it may reach these commands.
-- The service owns the contained Grok child process. React cannot spawn arbitrary processes, show native dialogs, open external URLs, or access Grok credential and session files.
+- The service owns the contained Grok child process. React cannot spawn arbitrary processes, open external URLs, or access Grok credential and session files. The native folder dialog is created by the reviewed `workspace_pick` Rust command rather than a general dialog or filesystem plugin; selected paths are canonicalized and validated before they cross the application seam.
+- Recent workspace preferences are capped, versioned, and limited to canonical directory paths. Missing entries remain visibly stale until the user removes them; malformed or unavailable preference storage produces a bounded UI warning, while a valid selected workspace remains usable. The store contains no credentials, session content, or raw runtime diagnostics.
 
 ## Expanding access safely
 
@@ -55,4 +56,4 @@ Launch the Windows development shell with:
 npm run tauri dev
 ```
 
-The security test fails if a remote production URL appears, the capability gains a core or plugin permission, the asset protocol or dangerous CSP bypass is enabled, a broad native-access plugin is introduced, or the runtime bridge starts depending on ACP method names, raw payloads, transport IDs, or child-process commands.
+The security test fails if a remote production URL appears, the capability differs from the exact event listen/unlisten allowlist, the asset protocol or dangerous CSP bypass is enabled, a broad native-access plugin is introduced, or the runtime bridge starts depending on ACP method names, raw payloads, transport IDs, or child-process commands.

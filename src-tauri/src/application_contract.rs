@@ -19,7 +19,10 @@ pub const APPLICATION_EVENT_NAME: &str = "grok-application-event";
 #[cfg(test)]
 pub const APPLICATION_COMMAND_NAMES: &[&str] = &[
     "setup_status",
+    "workspace_pick",
     "workspace_validate",
+    "workspace_recent_list",
+    "workspace_recent_remove",
     "runtime_snapshot",
     "runtime_start",
     "runtime_stop",
@@ -44,10 +47,35 @@ pub struct WorkspaceRequestDto {
     pub path: String,
 }
 
+impl WorkspaceRequestDto {
+    pub fn into_path(self) -> Result<std::path::PathBuf, ApplicationErrorDto> {
+        if self.path.is_empty()
+            || self.path.len() > MAX_WORKSPACE_PATH_BYTES
+            || self.path.chars().any(char::is_control)
+        {
+            return Err(ApplicationErrorDto::invalid_workspace());
+        }
+        Ok(std::path::PathBuf::from(self.path))
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceDto {
     pub path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentWorkspaceDto {
+    pub path: String,
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RecentWorkspaceListDto {
+    pub workspaces: Vec<RecentWorkspaceDto>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -363,7 +391,36 @@ impl From<ElicitationValueDto> for grok_runtime::ElicitationValue {
 #[serde(rename_all = "camelCase")]
 pub struct SetupStatusDto {
     pub runtime_available: bool,
+    pub executable_state: ExecutableStateDto,
+    pub executable_source: Option<ExecutableSourceDto>,
     pub failure: Option<ApplicationErrorDto>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutableStateDto {
+    Available,
+    Missing,
+    Invalid,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ExecutableSourceDto {
+    Configured,
+    UserInstall,
+    Path,
+}
+
+impl From<grok_runtime::GrokExecutableSource> for ExecutableSourceDto {
+    fn from(value: grok_runtime::GrokExecutableSource) -> Self {
+        match value {
+            grok_runtime::GrokExecutableSource::Environment => Self::Configured,
+            grok_runtime::GrokExecutableSource::UserInstall => Self::UserInstall,
+            grok_runtime::GrokExecutableSource::Path => Self::Path,
+            grok_runtime::GrokExecutableSource::Explicit => Self::Configured,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -840,29 +897,63 @@ pub fn acknowledgement_from_response(
 }
 
 impl WorkspaceDto {
+    #[cfg(test)]
     pub fn validate(request: WorkspaceRequestDto) -> Result<Self, ApplicationErrorDto> {
-        if request.path.is_empty()
-            || request.path.len() > MAX_WORKSPACE_PATH_BYTES
-            || request.path.chars().any(char::is_control)
-        {
-            return Err(ApplicationErrorDto::invalid_workspace());
-        }
+        let path = request.into_path()?;
+        let canonical =
+            crate::workspace::canonicalize_workspace(&path).map_err(ApplicationErrorDto::from)?;
+        Self::from_canonical_path(canonical)
+    }
 
-        let canonical = std::path::PathBuf::from(request.path)
-            .canonicalize()
-            .map_err(|_| ApplicationErrorDto::invalid_workspace())?;
-        if !canonical.is_dir() {
+    pub fn from_canonical_path(path: std::path::PathBuf) -> Result<Self, ApplicationErrorDto> {
+        if !path.is_absolute() {
             return Err(ApplicationErrorDto::invalid_workspace());
         }
-        let Some(path) = canonical.to_str() else {
+        let Some(path) = path.to_str() else {
             return Err(ApplicationErrorDto::boundary_violation());
         };
-        if path.len() > MAX_WORKSPACE_PATH_BYTES {
+        if path.is_empty()
+            || path.len() > MAX_WORKSPACE_PATH_BYTES
+            || path.chars().any(char::is_control)
+        {
             return Err(ApplicationErrorDto::invalid_workspace());
         }
 
         Ok(Self {
             path: path.to_owned(),
+        })
+    }
+}
+
+impl TryFrom<crate::workspace::RecentWorkspace> for RecentWorkspaceDto {
+    type Error = ApplicationErrorDto;
+
+    fn try_from(value: crate::workspace::RecentWorkspace) -> Result<Self, Self::Error> {
+        let path = value
+            .path
+            .to_str()
+            .filter(|path| {
+                !path.is_empty()
+                    && path.len() <= MAX_WORKSPACE_PATH_BYTES
+                    && !path.chars().any(char::is_control)
+            })
+            .ok_or_else(ApplicationErrorDto::boundary_violation)?;
+        Ok(Self {
+            path: path.to_owned(),
+            available: value.available,
+        })
+    }
+}
+
+impl RecentWorkspaceListDto {
+    pub fn from_recent(
+        workspaces: Vec<crate::workspace::RecentWorkspace>,
+    ) -> Result<Self, ApplicationErrorDto> {
+        Ok(Self {
+            workspaces: workspaces
+                .into_iter()
+                .map(RecentWorkspaceDto::try_from)
+                .collect::<Result<_, _>>()?,
         })
     }
 }
@@ -889,6 +980,15 @@ impl ApplicationErrorDto {
             code: ApplicationErrorCodeDto::InvalidWorkspace,
             diagnostic: "select an existing workspace directory".to_owned(),
             recoverable: true,
+        }
+    }
+
+    #[cfg(not(windows))]
+    pub fn workspace_picker_unavailable() -> Self {
+        Self {
+            code: ApplicationErrorCodeDto::CapabilityUnavailable,
+            diagnostic: "native workspace selection is unavailable on this platform".to_owned(),
+            recoverable: false,
         }
     }
 
@@ -928,6 +1028,19 @@ impl From<grok_runtime::RuntimeError> for ApplicationErrorDto {
     }
 }
 
+impl From<crate::workspace::WorkspaceError> for ApplicationErrorDto {
+    fn from(value: crate::workspace::WorkspaceError) -> Self {
+        match value {
+            crate::workspace::WorkspaceError::InvalidWorkspace => Self::invalid_workspace(),
+            crate::workspace::WorkspaceError::PreferencesUnavailable => Self {
+                code: ApplicationErrorCodeDto::PreferencesUnavailable,
+                diagnostic: "recent workspaces could not be saved".to_owned(),
+                recoverable: true,
+            },
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ApplicationErrorCodeDto {
@@ -949,6 +1062,7 @@ pub enum ApplicationErrorCodeDto {
     DecisionUnavailable,
     UnexpectedResponse,
     BoundaryViolation,
+    PreferencesUnavailable,
 }
 
 impl From<grok_runtime::RuntimeErrorCode> for ApplicationErrorCodeDto {
@@ -2253,6 +2367,16 @@ mod tests {
         );
         assert_fields!("workspace", WorkspaceDto, json!({ "path": "C:\\work" }));
         assert_fields!(
+            "recentWorkspace",
+            RecentWorkspaceDto,
+            json!({ "path": "C:\\work", "available": true })
+        );
+        assert_fields!(
+            "recentWorkspaceList",
+            RecentWorkspaceListDto,
+            json!({ "workspaces": [] })
+        );
+        assert_fields!(
             "newSessionRequest",
             NewSessionRequestDto,
             json!({ "workspace": "C:\\work" })
@@ -2324,6 +2448,8 @@ mod tests {
             SetupStatusDto,
             json!({
                 "runtimeAvailable": false,
+                "executableState": "missing",
+                "executableSource": null,
                 "failure": { "code": "executable_unavailable", "diagnostic": "missing", "recoverable": true }
             })
         );
@@ -2483,7 +2609,7 @@ mod tests {
                 "value": "high", "name": "High", "description": null, "group": null
             })
         );
-        assert_eq!(dto_fields.len(), 36, "every reviewed DTO needs a fixture");
+        assert_eq!(dto_fields.len(), 38, "every reviewed DTO needs a fixture");
 
         assert_values!(
             "runtimeState",
@@ -2573,6 +2699,22 @@ mod tests {
             ]
         );
         assert_values!(
+            "executableState",
+            [
+                ExecutableStateDto::Available,
+                ExecutableStateDto::Missing,
+                ExecutableStateDto::Invalid
+            ]
+        );
+        assert_values!(
+            "executableSource",
+            [
+                ExecutableSourceDto::Configured,
+                ExecutableSourceDto::UserInstall,
+                ExecutableSourceDto::Path
+            ]
+        );
+        assert_values!(
             "promptStopReason",
             [
                 PromptStopReasonDto::EndTurn,
@@ -2625,10 +2767,11 @@ mod tests {
                 ApplicationErrorCodeDto::UnknownInteraction,
                 ApplicationErrorCodeDto::DecisionUnavailable,
                 ApplicationErrorCodeDto::UnexpectedResponse,
-                ApplicationErrorCodeDto::BoundaryViolation
+                ApplicationErrorCodeDto::BoundaryViolation,
+                ApplicationErrorCodeDto::PreferencesUnavailable
             ]
         );
-        assert_eq!(enum_values.len(), 13, "every reviewed enum needs a fixture");
+        assert_eq!(enum_values.len(), 15, "every reviewed enum needs a fixture");
 
         assert_variant_fields!(
             "permissionScope",
@@ -2931,6 +3074,23 @@ mod tests {
         .expect_err("missing directory should fail closed");
         assert_eq!(error.code, ApplicationErrorCodeDto::InvalidWorkspace);
         assert!(!error.diagnostic.contains(&missing.to_string_lossy()[..]));
+    }
+
+    #[test]
+    fn workspace_request_rejects_unbounded_or_control_bearing_paths_without_echoing_them() {
+        for private_path in [
+            format!("C:\\private\\{}", "x".repeat(MAX_WORKSPACE_PATH_BYTES)),
+            "C:\\private\\secret\nworkspace".to_owned(),
+        ] {
+            let error = WorkspaceRequestDto {
+                path: private_path.clone(),
+            }
+            .into_path()
+            .expect_err("unsafe paths must fail before filesystem access");
+
+            assert_eq!(error.code, ApplicationErrorCodeDto::InvalidWorkspace);
+            assert!(!error.diagnostic.contains(&private_path));
+        }
     }
 
     #[test]

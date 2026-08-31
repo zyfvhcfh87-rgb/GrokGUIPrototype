@@ -19,6 +19,10 @@ test("typed bridge maps intents to exact narrow commands and one event channel",
     },
   });
 
+  await bridge.pickWorkspace();
+  await bridge.listRecentWorkspaces();
+  await bridge.validateWorkspace({ path: "C:\\workspace" });
+  await bridge.removeRecentWorkspace({ path: "C:\\old" });
   await bridge.newSession({ workspace: "C:\\workspace" });
   await bridge.sendPrompt({ sessionId: "session-1", text: "hello" });
   let received = null;
@@ -34,6 +38,22 @@ test("typed bridge maps intents to exact narrow commands and one event channel",
   });
 
   assert.deepEqual(invocations, [
+    {
+      command: "workspace_pick",
+      args: undefined,
+    },
+    {
+      command: "workspace_recent_list",
+      args: undefined,
+    },
+    {
+      command: "workspace_validate",
+      args: { request: { path: "C:\\workspace" } },
+    },
+    {
+      command: "workspace_recent_remove",
+      args: { request: { path: "C:\\old" } },
+    },
     {
       command: "session_new",
       args: { request: { workspace: "C:\\workspace" } },
