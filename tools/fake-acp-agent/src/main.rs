@@ -73,6 +73,9 @@ enum LifecycleFault {
     CloseError,
     HangClose,
     HangPrompt,
+    ListError,
+    LoadError,
+    ResumeError,
 }
 
 #[tokio::main(flavor = "current_thread")]
@@ -131,32 +134,55 @@ fn required_path<'a>(path: Option<&'a Path>, option: &str) -> io::Result<&'a Pat
 }
 
 fn persisted_session_exists(state_file: Option<&Path>) -> io::Result<bool> {
+    Ok(load_persisted_session(state_file)?.0)
+}
+
+fn load_persisted_session(state_file: Option<&Path>) -> io::Result<(bool, Option<String>)> {
     let Some(path) = state_file else {
-        return Ok(false);
+        return Ok((false, None));
     };
 
     let contents = match fs::read(path) {
         Ok(contents) => contents,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(false),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok((false, None)),
         Err(error) => return Err(error),
     };
-    if contents == PERSISTED_SESSION_MARKER {
-        Ok(true)
-    } else {
-        Err(io::Error::new(
+    if !contents.starts_with(PERSISTED_SESSION_MARKER) {
+        return Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "fixture state contains an unexpected marker",
-        ))
+        ));
+    }
+
+    let rest = contents[PERSISTED_SESSION_MARKER.len()..].to_vec();
+    if rest.is_empty() {
+        return Ok((true, None));
+    }
+    let cwd = String::from_utf8(rest)
+        .map_err(|_| {
+            io::Error::new(
+                io::ErrorKind::InvalidData,
+                "fixture state contains a non-UTF-8 workspace",
+            )
+        })?
+        .trim_end_matches(['\n', '\r'])
+        .to_owned();
+    if cwd.is_empty() {
+        Ok((true, None))
+    } else {
+        Ok((true, Some(cwd)))
     }
 }
 
-fn persist_session(path: &Path) -> io::Result<()> {
+fn persist_session(path: &Path, cwd: &str) -> io::Result<()> {
     if persisted_session_exists(Some(path))? {
         return Ok(());
     }
 
     let mut file = OpenOptions::new().write(true).create_new(true).open(path)?;
-    file.write_all(PERSISTED_SESSION_MARKER)
+    file.write_all(PERSISTED_SESSION_MARKER)?;
+    file.write_all(cwd.as_bytes())?;
+    file.write_all(b"\n")
 }
 
 fn run_descendant(directory: &Path, linger_after_eof: bool) -> io::Result<()> {
@@ -312,8 +338,10 @@ fn run_lifecycle(
     let stdout = io::stdout();
     let mut output = stdout.lock();
     let mut line = String::new();
+    let (session_created, persisted_cwd) = load_persisted_session(state_file)?;
     let mut state = LifecycleState {
-        session_created: persisted_session_exists(state_file)?,
+        session_created,
+        session_cwd: persisted_cwd,
         ..LifecycleState::default()
     };
 
@@ -354,8 +382,9 @@ fn run_lifecycle(
             "session/new" if state.authenticated => {
                 state.session_created = true;
                 state.session_open = true;
+                state.session_cwd = request_cwd(&frame);
                 if let Some(path) = state_file {
-                    persist_session(path)?;
+                    persist_session(path, session_cwd(&state))?;
                 }
                 write_frame(
                     &mut output,
@@ -380,6 +409,13 @@ fn run_lifecycle(
                 }
             }
             "session/list" if state.authenticated => {
+                if lifecycle_fault == Some(LifecycleFault::ListError) {
+                    write_frame(
+                        &mut output,
+                        error_response(id, -32013, "Deterministic list failure"),
+                    )?;
+                    continue;
+                }
                 if recovery_fault == Some(RecoveryFault::HangList) {
                     continue;
                 }
@@ -409,10 +445,13 @@ fn run_lifecycle(
                     )?;
                     continue;
                 }
-                let sessions = if state.session_created {
+                let sessions = if state.session_created
+                    && request_cwd(&frame)
+                        .is_none_or(|cwd| cwd_matches(&cwd, session_cwd(&state)))
+                {
                     json!([{
                         "sessionId": SESSION_ID,
-                        "cwd": FIXTURE_CWD,
+                        "cwd": session_cwd(&state),
                         "title": "Sanitized fixture session",
                         "updatedAt": "2030-01-01T00:00:00Z"
                     }])
@@ -425,13 +464,41 @@ fn run_lifecycle(
                 )?;
             }
             "session/resume" if state.authenticated && state.session_created => {
+                if lifecycle_fault == Some(LifecycleFault::ResumeError) {
+                    write_frame(
+                        &mut output,
+                        error_response(id, -32014, "Deterministic resume failure"),
+                    )?;
+                    continue;
+                }
                 if recovery_fault == Some(RecoveryFault::HangResume) {
+                    continue;
+                }
+                if !requested_cwd_matches_session(&frame, &state) {
+                    write_frame(
+                        &mut output,
+                        error_response(id, -32602, "Session does not belong to the requested workspace"),
+                    )?;
                     continue;
                 }
                 state.session_open = true;
                 write_frame(&mut output, result_response(id, json!({})))?;
             }
             "session/load" if state.authenticated && state.session_created => {
+                if lifecycle_fault == Some(LifecycleFault::LoadError) {
+                    write_frame(
+                        &mut output,
+                        error_response(id, -32015, "Deterministic load failure"),
+                    )?;
+                    continue;
+                }
+                if !requested_cwd_matches_session(&frame, &state) {
+                    write_frame(
+                        &mut output,
+                        error_response(id, -32602, "Session does not belong to the requested workspace"),
+                    )?;
+                    continue;
+                }
                 state.session_open = true;
                 write_frame(
                     &mut output,
@@ -895,7 +962,32 @@ struct LifecycleState {
     authenticated: bool,
     session_created: bool,
     session_open: bool,
+    session_cwd: Option<String>,
     prompt_count: u64,
+}
+
+fn request_cwd(frame: &Value) -> Option<String> {
+    frame
+        .pointer("/params/cwd")
+        .and_then(Value::as_str)
+        .map(str::to_owned)
+}
+
+fn session_cwd(state: &LifecycleState) -> &str {
+    state.session_cwd.as_deref().unwrap_or(FIXTURE_CWD)
+}
+
+fn requested_cwd_matches_session(frame: &Value, state: &LifecycleState) -> bool {
+    request_cwd(frame).is_none_or(|cwd| cwd_matches(&cwd, session_cwd(state)))
+}
+
+fn cwd_matches(left: &str, right: &str) -> bool {
+    if left == right {
+        return true;
+    }
+    let left = left.trim_end_matches(['/', '\\']);
+    let right = right.trim_end_matches(['/', '\\']);
+    left == right || left.eq_ignore_ascii_case(right)
 }
 
 fn run_cancellation_prompt(
