@@ -251,6 +251,155 @@ async fn session_lifecycle_is_exposed_without_acp_method_names() {
 }
 
 #[tokio::test]
+async fn sessions_cannot_be_reused_across_workspaces() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("selected workspace");
+    let other = tempfile::tempdir().expect("other workspace");
+
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+
+    let RuntimeResponse::Sessions(foreign) = runtime
+        .execute(RuntimeCommand::ListSessions {
+            workspace: Some(other.path().to_path_buf()),
+            cursor: None,
+        })
+        .await
+        .expect("foreign workspace list should succeed")
+    else {
+        panic!("expected a session page");
+    };
+    assert!(
+        foreign.sessions.is_empty(),
+        "a workspace must not inherit another workspace's sessions"
+    );
+
+    let resume_error = runtime
+        .execute(RuntimeCommand::ResumeSession {
+            session_id: session.session_id.clone(),
+            workspace: other.path().to_path_buf(),
+        })
+        .await
+        .expect_err("resume must stay inside the session workspace");
+    assert_eq!(
+        resume_error.code,
+        grok_runtime::RuntimeErrorCode::InvalidWorkspace
+    );
+
+    let load_error = runtime
+        .execute(RuntimeCommand::LoadSession {
+            session_id: session.session_id.clone(),
+            workspace: other.path().to_path_buf(),
+        })
+        .await
+        .expect_err("load must stay inside the session workspace");
+    assert_eq!(
+        load_error.code,
+        grok_runtime::RuntimeErrorCode::InvalidWorkspace
+    );
+
+    let RuntimeResponse::Sessions(owned) = runtime
+        .execute(RuntimeCommand::ListSessions {
+            workspace: Some(workspace.path().to_path_buf()),
+            cursor: None,
+        })
+        .await
+        .expect("owned workspace list should succeed")
+    else {
+        panic!("expected a session page");
+    };
+    assert_eq!(owned.sessions.len(), 1);
+    assert_eq!(owned.sessions[0].session_id, session.session_id);
+
+    runtime
+        .execute(RuntimeCommand::ResumeSession {
+            session_id: session.session_id,
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("resume inside the original workspace should succeed");
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn session_list_and_open_failures_are_reported() {
+    let list_runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "list-error"])
+            .auth_method("fixture_auth"),
+    );
+    list_runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    list_runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created");
+    let list_error = list_runtime
+        .execute(RuntimeCommand::ListSessions {
+            workspace: Some(workspace.path().to_path_buf()),
+            cursor: None,
+        })
+        .await
+        .expect_err("fixture list should fail");
+    assert_eq!(
+        list_error.code,
+        grok_runtime::RuntimeErrorCode::ProtocolRequestFailed
+    );
+    list_runtime.stop().await.expect("runtime should stop");
+
+    for (fault, command) in [
+        (
+            "load-error",
+            RuntimeCommand::LoadSession {
+                session_id: "session-001".to_owned(),
+                workspace: workspace.path().to_path_buf(),
+            },
+        ),
+        (
+            "resume-error",
+            RuntimeCommand::ResumeSession {
+                session_id: "session-001".to_owned(),
+                workspace: workspace.path().to_path_buf(),
+            },
+        ),
+    ] {
+        let runtime = GrokRuntime::for_test(
+            RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+                .args(["lifecycle", "--lifecycle-fault", fault])
+                .auth_method("fixture_auth"),
+        );
+        runtime.start().await.expect("runtime should start");
+        runtime
+            .execute(RuntimeCommand::NewSession {
+                workspace: workspace.path().to_path_buf(),
+            })
+            .await
+            .expect("session should be created");
+        let error = runtime
+            .execute(command)
+            .await
+            .expect_err("fixture open should fail");
+        assert_eq!(
+            error.code,
+            grok_runtime::RuntimeErrorCode::ProtocolRequestFailed
+        );
+        runtime.stop().await.expect("runtime should stop");
+    }
+}
+
+#[tokio::test]
 async fn prompt_streams_domain_events_and_accepts_scoped_user_decisions() {
     let runtime = GrokRuntime::for_test(
         RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),

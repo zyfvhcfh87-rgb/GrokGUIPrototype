@@ -88,6 +88,7 @@ struct RuntimeShared {
     tool_calls: StdMutex<HashMap<(String, String), ToolPresentation>>,
     active_prompts: RwLock<BTreeSet<String>>,
     session_controls: StdMutex<HashMap<String, RuntimeSessionControls>>,
+    session_workspaces: StdMutex<HashMap<String, PathBuf>>,
 }
 
 #[derive(Default)]
@@ -535,6 +536,7 @@ impl GrokRuntime {
                 tool_calls: StdMutex::new(HashMap::new()),
                 active_prompts: RwLock::new(BTreeSet::new()),
                 session_controls: StdMutex::new(HashMap::new()),
+                session_workspaces: StdMutex::new(HashMap::new()),
             }),
             target,
             operation: Arc::new(Mutex::new(())),
@@ -793,6 +795,32 @@ impl RuntimeShared {
             session_id: session_id.to_owned(),
             state,
         });
+    }
+
+    fn remember_session_workspace(&self, session_id: &str, workspace: PathBuf) {
+        self.session_workspaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(session_id.to_owned(), workspace);
+    }
+
+    fn require_session_workspace(
+        &self,
+        session_id: &str,
+        workspace: &Path,
+    ) -> Result<(), RuntimeError> {
+        let known = self
+            .session_workspaces
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match known.get(session_id) {
+            Some(known) if !same_workspace(known, workspace) => Err(runtime_error(
+                RuntimeErrorCode::InvalidWorkspace,
+                "session does not belong to the selected workspace",
+                true,
+            )),
+            _ => Ok(()),
+        }
     }
 
     fn remember_session_controls(&self, session: &RuntimeSession) {
@@ -2182,7 +2210,7 @@ async fn execute_command(
             let response = timeout_request(
                 request_timeout,
                 connection
-                    .send_request(NewSessionRequest::new(workspace))
+                    .send_request(NewSessionRequest::new(workspace.clone()))
                     .block_task(),
             )
             .await?;
@@ -2193,6 +2221,7 @@ async fn execute_command(
                 response.config_options.as_deref(),
                 normalize_serializable_session_response(&response),
             )?;
+            shared.remember_session_workspace(&session_id, workspace);
             shared.activate_session(&session_id);
             shared.remember_session_controls(&session);
             shared.session_state(&session_id, SessionState::Ready);
@@ -2202,13 +2231,26 @@ async fn execute_command(
             require_capability(capabilities.sessions.list, "session listing")?;
             let workspace = workspace.map(canonicalize_workspace).transpose()?;
             let cursor = validate_cursor(cursor)?;
-            let request = ListSessionsRequest::new().cwd(workspace).cursor(cursor);
+            let request = ListSessionsRequest::new()
+                .cwd(workspace.clone())
+                .cursor(cursor);
             let response = timeout_request(
                 request_timeout,
                 connection.send_request(request).block_task(),
             )
             .await?;
-            normalize_session_page(response)
+            let mut page = match normalize_session_page(response)? {
+                RuntimeResponse::Sessions(page) => page,
+                other => return Ok(other),
+            };
+            for session in &page.sessions {
+                shared.remember_session_workspace(&session.session_id, session.workspace.clone());
+            }
+            if let Some(workspace) = workspace.as_ref() {
+                page.sessions
+                    .retain(|session| same_workspace(&session.workspace, workspace));
+            }
+            Ok(RuntimeResponse::Sessions(page))
         }
         RuntimeCommand::LoadSession {
             session_id,
@@ -2217,6 +2259,7 @@ async fn execute_command(
             require_capability(capabilities.sessions.load, "session loading")?;
             let session_id = validate_session_id(session_id)?;
             let workspace = canonicalize_workspace(workspace)?;
+            shared.require_session_workspace(&session_id, &workspace)?;
             shared.emit(RuntimeEvent::SessionActivated {
                 session_id: session_id.clone(),
             });
@@ -2224,7 +2267,10 @@ async fn execute_command(
                 let response = timeout_request(
                     request_timeout,
                     connection
-                        .send_request(LoadSessionRequest::new(session_id.clone(), workspace))
+                        .send_request(LoadSessionRequest::new(
+                            session_id.clone(),
+                            workspace.clone(),
+                        ))
                         .block_task(),
                 )
                 .await?;
@@ -2234,6 +2280,7 @@ async fn execute_command(
                     response.config_options.as_deref(),
                     normalize_serializable_session_response(&response),
                 )?;
+                shared.remember_session_workspace(&session_id, workspace);
                 shared.activate_session(&session_id);
                 shared.remember_session_controls(&session);
                 Ok(RuntimeResponse::Session(session))
@@ -2256,6 +2303,7 @@ async fn execute_command(
             require_capability(capabilities.sessions.resume, "session resuming")?;
             let session_id = validate_session_id(session_id)?;
             let workspace = canonicalize_workspace(workspace)?;
+            shared.require_session_workspace(&session_id, &workspace)?;
             shared.emit(RuntimeEvent::SessionActivated {
                 session_id: session_id.clone(),
             });
@@ -2263,7 +2311,10 @@ async fn execute_command(
                 let response = timeout_request(
                     request_timeout,
                     connection
-                        .send_request(ResumeSessionRequest::new(session_id.clone(), workspace))
+                        .send_request(ResumeSessionRequest::new(
+                            session_id.clone(),
+                            workspace.clone(),
+                        ))
                         .block_task(),
                 )
                 .await?;
@@ -2273,6 +2324,7 @@ async fn execute_command(
                     response.config_options.as_deref(),
                     normalize_serializable_session_response(&response),
                 )?;
+                shared.remember_session_workspace(&session_id, workspace);
                 shared.activate_session(&session_id);
                 shared.remember_session_controls(&session);
                 Ok(RuntimeResponse::Session(session))
@@ -2694,6 +2746,25 @@ fn normalize_session_page(
     }))
 }
 
+fn same_workspace(left: &Path, right: &Path) -> bool {
+    #[cfg(windows)]
+    let equal = |left: &Path, right: &Path| {
+        left.as_os_str()
+            .to_string_lossy()
+            .eq_ignore_ascii_case(&right.as_os_str().to_string_lossy())
+    };
+    #[cfg(not(windows))]
+    let equal = |left: &Path, right: &Path| left == right;
+
+    if equal(left, right) {
+        return true;
+    }
+    match (std::fs::canonicalize(left), std::fs::canonicalize(right)) {
+        (Ok(left), Ok(right)) => equal(&left, &right),
+        _ => false,
+    }
+}
+
 fn canonicalize_workspace(workspace: PathBuf) -> Result<PathBuf, RuntimeError> {
     if !workspace.is_dir() {
         return Err(runtime_error(
@@ -3070,6 +3141,26 @@ mod tests {
 
         let error = canonicalize_workspace(missing).expect_err("workspace must already exist");
         assert_eq!(error.code, RuntimeErrorCode::InvalidWorkspace);
+    }
+
+    #[test]
+    fn workspace_identity_does_not_treat_distinct_directories_as_the_same_session_home() {
+        let first = std::env::temp_dir().join(format!(
+            "grok-runtime-workspace-a-{}",
+            std::process::id()
+        ));
+        let second = std::env::temp_dir().join(format!(
+            "grok-runtime-workspace-b-{}",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&first).expect("first workspace");
+        std::fs::create_dir_all(&second).expect("second workspace");
+
+        assert!(same_workspace(&first, &first));
+        assert!(!same_workspace(&first, &second));
+
+        let _ = std::fs::remove_dir_all(&first);
+        let _ = std::fs::remove_dir_all(&second);
     }
 
     #[tokio::test]

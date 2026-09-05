@@ -214,6 +214,103 @@ async fn lifecycle_resumes_without_replay() {
 }
 
 #[tokio::test]
+async fn lifecycle_keeps_sessions_inside_the_requested_workspace() {
+    let mut agent = AgentProcess::spawn("lifecycle");
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "protocolVersion": 1, "clientCapabilities": {} }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["id"], 1);
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "authenticate",
+            "params": { "methodId": "fixture_auth" }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["id"], 2);
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/new",
+            "params": {
+                "cwd": "C:\\fixture-workspace",
+                "mcpServers": []
+            }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["result"]["sessionId"], "session-001");
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/list",
+            "params": { "cwd": "C:\\other-workspace" }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["result"]["sessions"], json!([]));
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "session/resume",
+            "params": {
+                "sessionId": "session-001",
+                "cwd": "C:\\other-workspace",
+                "mcpServers": []
+            }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["error"]["code"], -32602);
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "session/load",
+            "params": {
+                "sessionId": "session-001",
+                "cwd": "C:\\other-workspace",
+                "mcpServers": []
+            }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["error"]["code"], -32602);
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 7,
+            "method": "session/list",
+            "params": { "cwd": "C:\\fixture-workspace" }
+        }))
+        .await;
+    let list = agent.receive().await;
+    assert_eq!(list["result"]["sessions"][0]["sessionId"], "session-001");
+    assert_eq!(
+        list["result"]["sessions"][0]["cwd"],
+        "C:\\fixture-workspace"
+    );
+
+    drop(agent.stdin);
+    let status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("fake agent should exit after stdin closes")
+        .expect("fake agent should be waitable");
+    assert!(status.success());
+}
+
+#[tokio::test]
 async fn lifecycle_streams_prompt_updates_and_honors_callback_responses() {
     let mut agent = AgentProcess::spawn("lifecycle");
     agent

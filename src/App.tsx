@@ -1,7 +1,12 @@
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
 import { createApplicationBridge } from "./application/bridge.ts";
+import { createSessionController } from "./application/session-controller.ts";
 import { createSetupController } from "./application/setup-controller.ts";
+import {
+  describeSessionList,
+  describeSessionStatus,
+} from "./application/sessions.ts";
 import { describeLaunchState, describeWorkspaceList } from "./application/setup.ts";
 import { createTauriTransport } from "./application/tauri.ts";
 import appIcon from "./assets/app-icon.svg";
@@ -23,16 +28,33 @@ const SOURCE_LABELS = {
 export function App() {
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
-  const controller = useMemo(
-    () => createSetupController(createApplicationBridge(createTauriTransport())),
+  const [sessionFocus, setSessionFocus] = useState(0);
+  const bridge = useMemo(
+    () => createApplicationBridge(createTauriTransport()),
     [],
   );
+  const controller = useMemo(() => createSetupController(bridge), [bridge]);
+  const sessions = useMemo(() => createSessionController(bridge), [bridge]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
+  const sessionState = useSyncExternalStore(sessions.subscribe, sessions.getState);
 
   useEffect(() => {
     void controller.initialize();
-    return () => controller.dispose();
-  }, [controller]);
+    void sessions.initialize();
+    return () => {
+      controller.dispose();
+      sessions.dispose();
+    };
+  }, [controller, sessions]);
+
+  useEffect(() => {
+    sessions.setRuntime(state.runtimeState, state.capabilities);
+  }, [sessions, state.capabilities, state.runtimeState]);
+
+  useEffect(() => {
+    void sessions.setWorkspace(state.selectedWorkspace);
+    setSessionFocus(0);
+  }, [sessions, state.selectedWorkspace]);
 
   const launch = describeLaunchState({
     setup: state.setup,
@@ -40,6 +62,14 @@ export function App() {
     failure: state.failure,
   });
   const recent = describeWorkspaceList(state.recentWorkspaces);
+  const sessionList = describeSessionList({
+    workspace: sessionState.workspace,
+    runtimeState: sessionState.runtimeState,
+    capabilities: sessionState.capabilities,
+    listKind: sessionState.listKind,
+    sessionCount: sessionState.sessions.length,
+    failure: sessionState.failure,
+  });
   const agent = state.capabilities?.agent;
   const authMethods = state.capabilities?.authenticationMethods ?? [];
   const cockpitClassName = [
@@ -164,6 +194,125 @@ export function App() {
               ))}
             </ul>
           )}
+
+          {state.selectedWorkspace !== null ? (
+            <section className="session-section" aria-labelledby="session-heading">
+              <div className="recent-heading">
+                <span id="session-heading">Sessions</span>
+                <span>{sessionState.sessions.length}</span>
+              </div>
+              <button
+                className="button button--wide"
+                type="button"
+                disabled={!sessionList.canCreate || sessionState.creating}
+                onClick={() => void sessions.createSession().catch(() => undefined)}
+              >
+                {sessionState.creating ? "Creating session…" : "New session"}
+              </button>
+              {sessionList.kind === "loading" ||
+              sessionList.kind === "empty" ||
+              sessionList.kind === "failed" ||
+              sessionList.kind === "stale" ||
+              sessionList.kind === "unavailable" ? (
+                <div className={`empty-list empty-list--${sessionList.kind}`}>
+                  <span className="empty-list__icon" aria-hidden="true">
+                    {sessionList.kind === "failed" ? "!" : "◌"}
+                  </span>
+                  <p>{sessionList.heading}</p>
+                  <span>{sessionList.detail}</span>
+                  {sessionList.canRetry ? (
+                    <button
+                      className="button"
+                      type="button"
+                      onClick={() => void sessions.refresh()}
+                    >
+                      Retry
+                    </button>
+                  ) : null}
+                </div>
+              ) : null}
+              {sessionState.sessions.length > 0 ? (
+                <ul
+                  className="session-list"
+                  role="listbox"
+                  aria-label="Sessions in the selected workspace"
+                  aria-activedescendant={
+                    sessionState.sessions[sessionFocus]?.sessionId
+                      ? `session-${sessionState.sessions[sessionFocus].sessionId}`
+                      : undefined
+                  }
+                >
+                  {sessionState.sessions.map((item, index) => (
+                    <li
+                      key={item.sessionId}
+                      id={`session-${item.sessionId}`}
+                      className={[
+                        item.status === "selected" && "is-selected",
+                        item.status === "closed" && "is-closed",
+                        item.status === "failed" && "is-failed",
+                        item.status === "stale" && "is-stale",
+                      ]
+                        .filter(Boolean)
+                        .join(" ") || undefined}
+                      role="option"
+                      aria-selected={item.status === "selected"}
+                    >
+                      <button
+                        className="session-list__open"
+                        type="button"
+                        disabled={!sessionList.canOpen || sessionState.opening}
+                        tabIndex={index === sessionFocus ? 0 : -1}
+                        onFocus={() => setSessionFocus(index)}
+                        onClick={() =>
+                          void sessions.openSession(item.sessionId).catch(() => undefined)
+                        }
+                        onKeyDown={(event) => {
+                          if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                            event.preventDefault();
+                            const next =
+                              event.key === "ArrowDown"
+                                ? Math.min(index + 1, sessionState.sessions.length - 1)
+                                : Math.max(index - 1, 0);
+                            setSessionFocus(next);
+                            document
+                              .getElementById(`session-open-${sessionState.sessions[next]?.sessionId}`)
+                              ?.focus();
+                          }
+                          if (
+                            (event.key === "Delete" || event.key === "Backspace") &&
+                            sessionList.canClose
+                          ) {
+                            event.preventDefault();
+                            void sessions.closeSession(item.sessionId).catch(() => undefined);
+                          }
+                        }}
+                        id={`session-open-${item.sessionId}`}
+                      >
+                        <span className="workspace-list__mark" aria-hidden="true">
+                          ▹
+                        </span>
+                        <span>
+                          <strong>{item.title ?? shortSessionId(item.sessionId)}</strong>
+                          <small>{describeSessionStatus(item.status)}</small>
+                        </span>
+                      </button>
+                      <button
+                        className="workspace-list__remove"
+                        type="button"
+                        disabled={!sessionList.canClose || sessionState.closing}
+                        aria-label={`Close session ${item.title ?? shortSessionId(item.sessionId)}`}
+                        onClick={() =>
+                          void sessions.closeSession(item.sessionId).catch(() => undefined)
+                        }
+                      >
+                        ×
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </section>
+          ) : null}
           </aside>
         ) : null}
 
@@ -185,6 +334,21 @@ export function App() {
               >
                 Reconnect
               </button>
+            ) : null}
+
+            {sessionState.selectedSessionId !== null ? (
+              <div className="selected-session" aria-label="Selected session">
+                <span className="selected-workspace__check" aria-hidden="true">✓</span>
+                <span>
+                  <small>Selected session</small>
+                  <strong>
+                    {sessionState.sessions.find(
+                      (item) => item.sessionId === sessionState.selectedSessionId,
+                    )?.title ?? shortSessionId(sessionState.selectedSessionId)}
+                  </strong>
+                  <code>{sessionState.selectedSessionId}</code>
+                </span>
+              </div>
             ) : null}
 
             {state.selectedWorkspace !== null ? (
@@ -211,6 +375,13 @@ export function App() {
             <div className="inline-alert" role="alert">
               <strong>Workspace needs attention</strong>
               <span>{state.workspaceFailure.diagnostic}</span>
+            </div>
+          ) : null}
+
+          {sessionState.failure !== null ? (
+            <div className="inline-alert" role="alert">
+              <strong>Session needs attention</strong>
+              <span>{sessionState.failure.diagnostic}</span>
             </div>
           ) : null}
         </section>
@@ -255,6 +426,14 @@ export function App() {
               <dt>Protocol</dt>
               <dd>{state.capabilities ? `ACP v${state.capabilities.protocolVersion}` : "—"}</dd>
             </div>
+            <div>
+              <dt>Sessions</dt>
+              <dd>
+                {state.capabilities
+                  ? sessionCapabilityLabel(state.capabilities.sessions)
+                  : "—"}
+              </dd>
+            </div>
           </dl>
 
           <div className="auth-card">
@@ -289,6 +468,8 @@ export function App() {
         <span aria-hidden="true">·</span>
         <span>Native folder picker through a reviewed Rust command</span>
         <span aria-hidden="true">·</span>
+        <span>Sessions through GrokRuntime</span>
+        <span aria-hidden="true">·</span>
         <span>No credential-file access</span>
       </footer>
     </div>
@@ -299,4 +480,25 @@ function workspaceName(path: string): string {
   const trimmed = path.replace(/[\\/]+$/, "");
   const separator = Math.max(trimmed.lastIndexOf("\\"), trimmed.lastIndexOf("/"));
   return trimmed.slice(separator + 1) || trimmed;
+}
+
+function shortSessionId(sessionId: string): string {
+  return sessionId.length <= 18 ? sessionId : `${sessionId.slice(0, 8)}…${sessionId.slice(-6)}`;
+}
+
+function sessionCapabilityLabel(sessions: {
+  create: boolean;
+  list: boolean;
+  load: boolean;
+  resume: boolean;
+  close: boolean;
+}): string {
+  const available = [
+    sessions.list ? "list" : null,
+    sessions.create ? "new" : null,
+    sessions.load ? "load" : null,
+    sessions.resume ? "resume" : null,
+    sessions.close ? "close" : null,
+  ].filter(Boolean);
+  return available.length > 0 ? available.join(" · ") : "None advertised";
 }
