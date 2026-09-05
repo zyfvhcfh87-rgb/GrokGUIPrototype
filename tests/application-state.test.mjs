@@ -412,6 +412,12 @@ test("every structured application event updates its owned view state", () => {
   assert.equal(session.messages["assistant:assistant-1"].text, "hi");
   assert.equal(session.thoughts["thought-1"].text, "checking");
   assert.equal(session.toolCalls["tool-1"].status, "running");
+  assert.deepEqual(session.timeline, [
+    { kind: "user_message", id: "user:user-1" },
+    { kind: "assistant_message", id: "assistant:assistant-1" },
+    { kind: "thought", id: "thought-1" },
+    { kind: "tool", id: "tool-1" },
+  ]);
   assert.deepEqual(session.permissions, {});
   assert.deepEqual(session.elicitations, {});
   assert.equal(session.plan[0].status, "in_progress");
@@ -425,4 +431,99 @@ test("every structured application event updates its owned view state", () => {
   assert.deepEqual(state.runtime.invalidatedAreas, ["models"]);
   assert.equal(state.observedExtensions.unknown, 1);
   assert.equal(state.runtime.failure.diagnostic, "safe failure");
+});
+
+test("message and thought chunks append without duplicating timeline items", () => {
+  let state = reduceApplicationEvent(initialApplicationState(), {
+    generation: 1,
+    sequence: 1,
+    event: { type: "session_activated", sessionId: "session-1" },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 2,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "Hel",
+      truncated: false,
+    },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 3,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "lo",
+      truncated: false,
+    },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 4,
+    event: {
+      type: "thought_chunk_received",
+      sessionId: "session-1",
+      thoughtId: "thought-1",
+      text: "one ",
+      truncated: false,
+    },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 5,
+    event: {
+      type: "thought_chunk_received",
+      sessionId: "session-1",
+      thoughtId: "thought-1",
+      text: "two",
+      truncated: true,
+    },
+  });
+
+  const session = state.sessions["session-1"];
+  assert.equal(session.messages["assistant:assistant-1"].text, "Hello");
+  assert.equal(session.thoughts["thought-1"].text, "one two");
+  assert.equal(session.thoughts["thought-1"].truncated, true);
+  assert.deepEqual(
+    session.timeline.filter((item) => item.kind !== "tool"),
+    [
+      { kind: "assistant_message", id: "assistant:assistant-1" },
+      { kind: "thought", id: "thought-1" },
+    ],
+  );
+});
+
+test("tool cards update in place across running, completed, and failed statuses", () => {
+  let state = reduceApplicationEvent(initialApplicationState(), {
+    generation: 1,
+    sequence: 1,
+    event: { type: "session_activated", sessionId: "session-1" },
+  });
+  const change = (sequence, status, detail) =>
+    reduceApplicationEvent(state, {
+      generation: 1,
+      sequence,
+      event: {
+        type: "tool_call_changed",
+        sessionId: "session-1",
+        callId: "term-1",
+        title: "List",
+        kind: "terminal_command",
+        status,
+        detail,
+      },
+    });
+
+  state = change(2, "running", "partial");
+  state = change(3, "completed", "done");
+  state = change(4, "failed", "nope");
+
+  const session = state.sessions["session-1"];
+  assert.equal(session.toolCalls["term-1"].status, "failed");
+  assert.equal(session.toolCalls["term-1"].detail, "nope");
+  assert.deepEqual(session.timeline, [{ kind: "tool", id: "term-1" }]);
 });

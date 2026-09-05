@@ -6,11 +6,11 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 use application_contract::{
     APPLICATION_EVENT_NAME, AcknowledgementDto, ApplicationErrorDto, ApplicationEvent,
     ApplicationEventClock, ElicitationResponseRequestDto, ExecutableSourceDto, ExecutableStateDto,
-    InteractionKindDto, ListSessionsRequestDto, NewSessionRequestDto, PermissionResponseRequestDto,
-    PromptRequestDto, PromptResultDto, RecentWorkspaceListDto, RuntimeSnapshotDto, SessionDto,
-    SessionPageDto, SessionRequestDto, SessionWorkspaceRequestDto, SetSessionConfigRequestDto,
-    SetSessionModeRequestDto, SetSessionModelRequestDto, SetupStatusDto, WorkspaceDto,
-    WorkspaceRequestDto, acknowledgement_from_response, prompt_from_response,
+    InteractionKindDto, ListSessionsRequestDto, NewSessionRequestDto, OpenExternalUrlRequestDto,
+    PermissionResponseRequestDto, PromptRequestDto, PromptResultDto, RecentWorkspaceListDto,
+    RuntimeSnapshotDto, SessionDto, SessionPageDto, SessionRequestDto, SessionWorkspaceRequestDto,
+    SetSessionConfigRequestDto, SetSessionModeRequestDto, SetSessionModelRequestDto, SetupStatusDto,
+    WorkspaceDto, WorkspaceRequestDto, acknowledgement_from_response, prompt_from_response,
     session_from_response, sessions_from_response,
 };
 use grok_runtime::{
@@ -212,6 +212,41 @@ fn workspace_recent_remove(
     request: WorkspaceRequestDto,
 ) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
     manager.remove(request.into_path()?)
+}
+
+#[tauri::command]
+fn open_external_url(
+    request: OpenExternalUrlRequestDto,
+) -> Result<AcknowledgementDto, ApplicationErrorDto> {
+    let url = request.validated_url()?;
+    open_validated_external_url(&url)?;
+    Ok(AcknowledgementDto::accepted())
+}
+
+fn open_validated_external_url(url: &str) -> Result<(), ApplicationErrorDto> {
+    let mut command = opener_command();
+    command.arg(url);
+    command
+        .spawn()
+        .map(|_| ())
+        .map_err(|_| ApplicationErrorDto::external_url_open_failed())
+}
+
+fn opener_command() -> std::process::Command {
+    #[cfg(target_os = "windows")]
+    {
+        let mut command = std::process::Command::new("rundll32");
+        command.arg("url.dll,FileProtocolHandler");
+        command
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("/usr/bin/open")
+    }
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        std::process::Command::new("xdg-open")
+    }
 }
 
 #[tauri::command]
@@ -495,6 +530,7 @@ pub fn run() {
             workspace_validate,
             workspace_recent_list,
             workspace_recent_remove,
+            open_external_url,
             runtime_snapshot,
             runtime_start,
             runtime_stop,

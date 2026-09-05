@@ -6,7 +6,7 @@ Issue #8 defines the reviewed interface between the native application core and 
 
 The desktop exposes only these command groups:
 
-- setup and workspace: `setup_status`, `workspace_pick`, `workspace_validate`, `workspace_recent_list`, `workspace_recent_remove`;
+- setup, workspace, and links: `setup_status`, `workspace_pick`, `workspace_validate`, `workspace_recent_list`, `workspace_recent_remove`, `open_external_url`;
 - runtime lifecycle: `runtime_snapshot`, `runtime_start`, `runtime_stop`, `runtime_restart`;
 - sessions: `session_new`, `session_list`, `session_load`, `session_resume`, `session_close`;
 - turns and controls: `prompt_send`, `prompt_cancel`, `session_set_mode`, `session_set_model`, `session_set_config`;
@@ -17,6 +17,8 @@ Each command accepts one reviewed request DTO when input is required and returns
 The TypeScript `createApplicationBridge` module mirrors this interface without depending on Tauri internals. The application composition root supplies the official Tauri invoke/listen adapter; tests use an in-memory adapter through the same interface. The setup controller subscribes before it inspects or starts the runtime, then feeds every envelope through the shared deterministic reducer before projecting setup state. Connecting and authenticating transitions cannot be lost, duplicated, or regressed by stale delivery during launch.
 
 The session controller binds list, new, load, resume, and close to the currently selected workspace. Changing workspace clears the selected session before the next list is requested, so a session from one folder cannot be opened against another. `GrokRuntime` also remembers session-to-workspace identity from create and list, filters listed sessions to the requested workspace, and rejects load or resume when that identity does not match. Session files are never read or written by the GUI.
+
+The conversation controller sends prompts and control changes through the same reviewed commands. It reduces the shared event stream into a timeline of user, assistant, thought, and tool cards, then projects composer and control availability from advertised capabilities. Model, reasoning, mode, command, and config lists come from the current session and runtime catalog. They are never hard-coded. Markdown is parsed into React nodes without HTML, and only credential-free `http`/`https` URLs may be opened through `open_external_url`.
 
 ## Events and ordering
 
