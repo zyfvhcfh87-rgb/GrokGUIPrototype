@@ -6,6 +6,7 @@ export const APPLICATION_COMMANDS = {
   validateWorkspace: "workspace_validate",
   listRecentWorkspaces: "workspace_recent_list",
   removeRecentWorkspace: "workspace_recent_remove",
+  openExternalUrl: "open_external_url",
   runtimeSnapshot: "runtime_snapshot",
   startRuntime: "runtime_start",
   stopRuntime: "runtime_stop",
@@ -319,6 +320,7 @@ export type ApplicationError = {
 };
 
 export type WorkspaceRequest = { path: string };
+export type OpenExternalUrlRequest = { url: string };
 export type Workspace = { path: string };
 export type RecentWorkspace = { path: string; available: boolean };
 export type RecentWorkspaceList = { workspaces: RecentWorkspace[] };
@@ -536,6 +538,7 @@ export const APPLICATION_DTO_FIELDS = {
   ]),
   applicationError: fieldsOf<ApplicationError>()(["code", "diagnostic", "recoverable"]),
   workspaceRequest: fieldsOf<WorkspaceRequest>()(["path"]),
+  openExternalUrlRequest: fieldsOf<OpenExternalUrlRequest>()(["url"]),
   workspace: fieldsOf<Workspace>()(["path"]),
   recentWorkspace: fieldsOf<RecentWorkspace>()(["available", "path"]),
   recentWorkspaceList: fieldsOf<RecentWorkspaceList>()(["workspaces"]),

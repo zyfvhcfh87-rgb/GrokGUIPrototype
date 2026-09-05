@@ -23,6 +23,17 @@ export type StreamChunk = {
   truncated: boolean;
 };
 
+export type ConversationItemKind =
+  | "user_message"
+  | "assistant_message"
+  | "thought"
+  | "tool";
+
+export type ConversationItemRef = {
+  kind: ConversationItemKind;
+  id: string;
+};
+
 export type ToolCallState = {
   id: string;
   title: string;
@@ -49,6 +60,7 @@ export type SessionViewState = {
   state: SessionState;
   title: string | null;
   updatedAt: string | null;
+  timeline: ConversationItemRef[];
   messages: Record<string, StreamChunk>;
   thoughts: Record<string, StreamChunk>;
   toolCalls: Record<string, ToolCallState>;
@@ -317,6 +329,7 @@ function initialSessionState(): SessionViewState {
     state: "creating",
     title: null,
     updatedAt: null,
+    timeline: [],
     messages: {},
     thoughts: {},
     toolCalls: {},
@@ -358,6 +371,7 @@ function reduceSessionEvent(
     case "tool_call_changed":
       return {
         ...session,
+        timeline: rememberTimelineItem(session.timeline, "tool", event.callId),
         toolCalls: {
           ...session.toolCalls,
           [event.callId]: {
@@ -494,8 +508,15 @@ function appendChunk(
 ): SessionViewState {
   const chunks = session[collection];
   const previous = chunks[id];
+  const kind: ConversationItemKind =
+    collection === "thoughts"
+      ? "thought"
+      : id.startsWith("user:")
+        ? "user_message"
+        : "assistant_message";
   return {
     ...session,
+    timeline: rememberTimelineItem(session.timeline, kind, id),
     [collection]: {
       ...chunks,
       [id]: {
@@ -505,6 +526,16 @@ function appendChunk(
       },
     },
   };
+}
+
+function rememberTimelineItem(
+  timeline: ConversationItemRef[],
+  kind: ConversationItemKind,
+  id: string,
+): ConversationItemRef[] {
+  return timeline.some((item) => item.kind === kind && item.id === id)
+    ? timeline
+    : [...timeline, { kind, id }];
 }
 
 function sessionIdForEvent(event: ApplicationEvent): string | null {

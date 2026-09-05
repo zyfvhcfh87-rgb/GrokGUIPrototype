@@ -1,6 +1,8 @@
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
+import type { ApplicationTransport } from "./application/bridge.ts";
 import { createApplicationBridge } from "./application/bridge.ts";
+import { createConversationController } from "./application/conversation-controller.ts";
 import { createSessionController } from "./application/session-controller.ts";
 import { createSetupController } from "./application/setup-controller.ts";
 import {
@@ -10,6 +12,14 @@ import {
 import { describeLaunchState, describeWorkspaceList } from "./application/setup.ts";
 import { createTauriTransport } from "./application/tauri.ts";
 import appIcon from "./assets/app-icon.svg";
+import { ActivityPane } from "./cockpit/ActivityPane.tsx";
+import { ConversationPane } from "./cockpit/ConversationPane.tsx";
+
+export type AppProps = {
+  transport?: ApplicationTransport;
+  autoWorkspace?: string;
+  autoOpenFirstSession?: boolean;
+};
 
 const AUTH_LABELS = {
   cached_token: "Cached sign-in",
@@ -25,36 +35,74 @@ const SOURCE_LABELS = {
   path: "System PATH",
 } as const;
 
-export function App() {
+export function App({
+  transport,
+  autoWorkspace,
+  autoOpenFirstSession = false,
+}: AppProps = {}) {
   const [projectsOpen, setProjectsOpen] = useState(true);
   const [detailsOpen, setDetailsOpen] = useState(true);
   const [sessionFocus, setSessionFocus] = useState(0);
   const bridge = useMemo(
-    () => createApplicationBridge(createTauriTransport()),
-    [],
+    () => createApplicationBridge(transport ?? createTauriTransport()),
+    [transport],
   );
   const controller = useMemo(() => createSetupController(bridge), [bridge]);
   const sessions = useMemo(() => createSessionController(bridge), [bridge]);
+  const conversation = useMemo(() => createConversationController(bridge), [bridge]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const sessionState = useSyncExternalStore(sessions.subscribe, sessions.getState);
+  const conversationState = useSyncExternalStore(conversation.subscribe, conversation.getState);
 
   useEffect(() => {
     void controller.initialize();
     void sessions.initialize();
+    void conversation.initialize();
     return () => {
       controller.dispose();
       sessions.dispose();
+      conversation.dispose();
     };
-  }, [controller, sessions]);
+  }, [controller, conversation, sessions]);
 
   useEffect(() => {
     sessions.setRuntime(state.runtimeState, state.capabilities);
-  }, [sessions, state.capabilities, state.runtimeState]);
+    conversation.setRuntime(state.runtimeState, state.capabilities);
+  }, [conversation, sessions, state.capabilities, state.runtimeState]);
 
   useEffect(() => {
     void sessions.setWorkspace(state.selectedWorkspace);
     setSessionFocus(0);
   }, [sessions, state.selectedWorkspace]);
+
+  useEffect(() => {
+    conversation.setSession(sessionState.selectedSession);
+  }, [conversation, sessionState.selectedSession]);
+
+  const autoWorkspaceStarted = useRef(false);
+  const autoSessionStarted = useRef(false);
+
+  useEffect(() => {
+    if (autoWorkspace === undefined || autoWorkspaceStarted.current || state.selectedWorkspace !== null) {
+      return;
+    }
+    autoWorkspaceStarted.current = true;
+    void controller.openRecent(autoWorkspace).catch(() => undefined);
+  }, [autoWorkspace, controller, state.selectedWorkspace]);
+
+  useEffect(() => {
+    const first = sessionState.sessions[0];
+    if (
+      !autoOpenFirstSession ||
+      autoSessionStarted.current ||
+      sessionState.selectedSessionId !== null ||
+      first === undefined
+    ) {
+      return;
+    }
+    autoSessionStarted.current = true;
+    void sessions.openSession(first.sessionId).catch(() => undefined);
+  }, [autoOpenFirstSession, sessionState.selectedSessionId, sessionState.sessions, sessions]);
 
   const launch = describeLaunchState({
     setup: state.setup,
@@ -62,6 +110,8 @@ export function App() {
     failure: state.failure,
   });
   const recent = describeWorkspaceList(state.recentWorkspaces);
+  const conversationView = conversation.presentation();
+  const hasSession = sessionState.selectedSessionId !== null;
   const sessionList = describeSessionList({
     workspace: sessionState.workspace,
     runtimeState: sessionState.runtimeState,
@@ -122,7 +172,7 @@ export function App() {
 
       <main
         className={cockpitClassName}
-        aria-label="Grok Build setup"
+        aria-label={hasSession ? "Grok Build conversation" : "Grok Build setup"}
       >
         {projectsOpen ? (
           <aside
@@ -316,7 +366,27 @@ export function App() {
           </aside>
         ) : null}
 
-        <section className="shell-panel shell-panel--main" aria-labelledby="launch-heading">
+        <section
+          className={[
+            "shell-panel",
+            "shell-panel--main",
+            hasSession && "shell-panel--conversation",
+          ]
+            .filter(Boolean)
+            .join(" ")}
+          aria-labelledby={hasSession ? "conversation-heading" : "launch-heading"}
+        >
+          {hasSession ? (
+            <ConversationPane
+              presentation={conversationView}
+              draft={conversationState.draft}
+              onDraftChange={conversation.setDraft}
+              onSend={() => void conversation.sendPrompt().catch(() => undefined)}
+              onCancel={() => void conversation.cancelPrompt().catch(() => undefined)}
+              onOpenUrl={(href) => void conversation.openExternalUrl(href).catch(() => undefined)}
+            />
+          ) : (
+            <>
           <div className={`launch-card launch-card--${launch.kind}`}>
             <div className="launch-card__icon" aria-hidden="true">
               <img src={appIcon} alt="" />
@@ -384,14 +454,39 @@ export function App() {
               <span>{sessionState.failure.diagnostic}</span>
             </div>
           ) : null}
+            </>
+          )}
         </section>
 
         {detailsOpen ? (
           <aside
             id="details-panel"
             className="shell-panel details-panel"
-            aria-labelledby="details-heading"
+            aria-labelledby={hasSession ? "activity-heading" : "details-heading"}
           >
+          {hasSession ? (
+            <ActivityPane
+              presentation={conversationView}
+              controlBusy={conversationState.controlBusy}
+              onModelChange={(modelId) =>
+                void conversation
+                  .setModel(modelId, conversationView.controls.currentReasoningValue)
+                  .catch(() => undefined)
+              }
+              onReasoningChange={(value) => {
+                const modelId = conversationView.controls.currentModelId;
+                if (modelId !== null) {
+                  void conversation.setModel(modelId, value).catch(() => undefined);
+                }
+              }}
+              onModeChange={(modeId) => void conversation.setMode(modeId).catch(() => undefined)}
+              onConfigChange={(configId, value) =>
+                void conversation.setConfig(configId, value).catch(() => undefined)
+              }
+              onInsertCommand={conversation.insertCommand}
+            />
+          ) : (
+            <>
           <p className="shell-panel__eyebrow">Connection</p>
           <h1 id="details-heading">Runtime details</h1>
 
@@ -459,6 +554,8 @@ export function App() {
             <span aria-hidden="true">⌾</span>
             Credential contents stay with Grok and never cross into this interface.
           </p>
+            </>
+          )}
           </aside>
         ) : null}
       </main>
@@ -468,7 +565,7 @@ export function App() {
         <span aria-hidden="true">·</span>
         <span>Native folder picker through a reviewed Rust command</span>
         <span aria-hidden="true">·</span>
-        <span>Sessions through GrokRuntime</span>
+        <span>Streaming conversation through GrokRuntime</span>
         <span aria-hidden="true">·</span>
         <span>No credential-file access</span>
       </footer>

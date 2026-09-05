@@ -6,6 +6,7 @@ import {
   type ElicitationResponseRequest,
   type ListSessionsRequest,
   type NewSessionRequest,
+  type OpenExternalUrlRequest,
   type PermissionResponseRequest,
   type PromptRequest,
   type PromptResult,
@@ -47,6 +48,11 @@ export function createApplicationBridge(transport: ApplicationTransport) {
     removeRecentWorkspace: (request: WorkspaceRequest) =>
       invoke<RecentWorkspaceList, WorkspaceRequest>(
         APPLICATION_COMMANDS.removeRecentWorkspace,
+        request,
+      ),
+    openExternalUrl: (request: OpenExternalUrlRequest) =>
+      invoke<Acknowledgement, OpenExternalUrlRequest>(
+        APPLICATION_COMMANDS.openExternalUrl,
         request,
       ),
     runtimeSnapshot: () =>

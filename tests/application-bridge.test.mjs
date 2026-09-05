@@ -25,6 +25,7 @@ test("typed bridge maps intents to exact narrow commands and one event channel",
   await bridge.removeRecentWorkspace({ path: "C:\\old" });
   await bridge.newSession({ workspace: "C:\\workspace" });
   await bridge.sendPrompt({ sessionId: "session-1", text: "hello" });
+  await bridge.openExternalUrl({ url: "https://example.com/docs" });
   let received = null;
   await bridge.onEvent((event) => {
     received = event;
@@ -61,6 +62,10 @@ test("typed bridge maps intents to exact narrow commands and one event channel",
     {
       command: "prompt_send",
       args: { request: { sessionId: "session-1", text: "hello" } },
+    },
+    {
+      command: "open_external_url",
+      args: { request: { url: "https://example.com/docs" } },
     },
   ]);
   assert.equal(subscribedEvent, "grok-application-event");

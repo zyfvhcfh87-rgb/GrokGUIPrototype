@@ -6,6 +6,7 @@ const MAX_EVENT_TEXT_BYTES: usize = 64 * 1_024;
 const MAX_DISPLAY_TEXT_BYTES: usize = 8 * 1_024;
 const MAX_EVENT_COLLECTION_ITEMS: usize = 256;
 const MAX_WORKSPACE_PATH_BYTES: usize = 32 * 1_024;
+const MAX_EXTERNAL_URL_BYTES: usize = 2_048;
 const MAX_IDENTIFIER_BYTES: usize = 256;
 const MAX_CURSOR_BYTES: usize = 4 * 1_024;
 const MAX_PROMPT_BYTES: usize = 1_024 * 1_024;
@@ -23,6 +24,7 @@ pub const APPLICATION_COMMAND_NAMES: &[&str] = &[
     "workspace_validate",
     "workspace_recent_list",
     "workspace_recent_remove",
+    "open_external_url",
     "runtime_snapshot",
     "runtime_start",
     "runtime_stop",
@@ -45,6 +47,18 @@ pub const APPLICATION_COMMAND_NAMES: &[&str] = &[
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceRequestDto {
     pub path: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct OpenExternalUrlRequestDto {
+    pub url: String,
+}
+
+impl OpenExternalUrlRequestDto {
+    pub fn validated_url(self) -> Result<String, ApplicationErrorDto> {
+        validate_external_url(&self.url)
+    }
 }
 
 impl WorkspaceRequestDto {
@@ -972,6 +986,22 @@ impl ApplicationErrorDto {
             code: ApplicationErrorCodeDto::InvalidRequest,
             diagnostic: "request data was invalid or exceeded an application boundary".to_owned(),
             recoverable: false,
+        }
+    }
+
+    pub fn invalid_external_url() -> Self {
+        Self {
+            code: ApplicationErrorCodeDto::InvalidRequest,
+            diagnostic: "that link is not a safe http or https URL".to_owned(),
+            recoverable: false,
+        }
+    }
+
+    pub fn external_url_open_failed() -> Self {
+        Self {
+            code: ApplicationErrorCodeDto::ProtocolRequestFailed,
+            diagnostic: "that link could not be opened".to_owned(),
+            recoverable: true,
         }
     }
 
@@ -2034,6 +2064,40 @@ fn validate_token(value: &str, maximum_bytes: usize) -> Result<(), ApplicationEr
     }
 }
 
+pub fn validate_external_url(value: &str) -> Result<String, ApplicationErrorDto> {
+    if value.is_empty()
+        || value.len() > MAX_EXTERNAL_URL_BYTES
+        || value
+            .chars()
+            .any(|character| character.is_whitespace() || character.is_control() || character == '\\')
+    {
+        return Err(ApplicationErrorDto::invalid_external_url());
+    }
+    let rest = split_http_url(value).ok_or_else(ApplicationErrorDto::invalid_external_url)?;
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    if authority.is_empty() || authority.contains('@') {
+        return Err(ApplicationErrorDto::invalid_external_url());
+    }
+    let host = authority.split(':').next().unwrap_or("");
+    if host.is_empty() {
+        return Err(ApplicationErrorDto::invalid_external_url());
+    }
+    Ok(value.to_owned())
+}
+
+fn split_http_url(value: &str) -> Option<&str> {
+    for prefix in ["https://", "http://"] {
+        if value.len() >= prefix.len()
+            && value.is_char_boundary(prefix.len())
+            && value[..prefix.len()].eq_ignore_ascii_case(prefix)
+        {
+            return Some(&value[prefix.len()..]);
+        }
+    }
+    None
+}
+
 fn validate_workspace_input(value: &str) -> Result<(), ApplicationErrorDto> {
     if value.is_empty()
         || value.len() > MAX_WORKSPACE_PATH_BYTES
@@ -2365,6 +2429,11 @@ mod tests {
             WorkspaceRequestDto,
             json!({ "path": "C:\\work" })
         );
+        assert_fields!(
+            "openExternalUrlRequest",
+            OpenExternalUrlRequestDto,
+            json!({ "url": "https://example.com/docs" })
+        );
         assert_fields!("workspace", WorkspaceDto, json!({ "path": "C:\\work" }));
         assert_fields!(
             "recentWorkspace",
@@ -2609,7 +2678,7 @@ mod tests {
                 "value": "high", "name": "High", "description": null, "group": null
             })
         );
-        assert_eq!(dto_fields.len(), 38, "every reviewed DTO needs a fixture");
+        assert_eq!(dto_fields.len(), 39, "every reviewed DTO needs a fixture");
 
         assert_values!(
             "runtimeState",
@@ -3090,6 +3159,34 @@ mod tests {
 
             assert_eq!(error.code, ApplicationErrorCodeDto::InvalidWorkspace);
             assert!(!error.diagnostic.contains(&private_path));
+        }
+    }
+
+    #[test]
+    fn external_urls_accept_only_credential_free_http_or_https() {
+        assert_eq!(
+            validate_external_url("https://docs.x.ai/build/overview").expect("safe url"),
+            "https://docs.x.ai/build/overview"
+        );
+        assert_eq!(
+            validate_external_url("HTTP://example.com/path").expect("http is allowed"),
+            "HTTP://example.com/path"
+        );
+
+        for rejected in [
+            "javascript:alert(1)",
+            "data:text/html,hi",
+            "file:///etc/passwd",
+            "https://user:secret@example.com",
+            "https://",
+            "https://example.com/has space",
+            &format!("https://example.com/{}", "a".repeat(MAX_EXTERNAL_URL_BYTES)),
+        ] {
+            let error =
+                validate_external_url(rejected).expect_err("unsafe URLs must fail closed");
+            assert_eq!(error.code, ApplicationErrorCodeDto::InvalidRequest);
+            assert!(!error.diagnostic.contains(rejected));
+            assert!(!error.diagnostic.contains("secret"));
         }
     }
 

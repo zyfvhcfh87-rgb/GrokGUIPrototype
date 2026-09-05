@@ -220,6 +220,12 @@ button:focus-visible {
     linear-gradient(150deg, rgb(23 25 32 / 96%), rgb(13 14 18 / 94%));
 }
 
+.shell-panel--conversation {
+  align-content: stretch;
+  padding: 0;
+  overflow: hidden;
+}
+
 .shell-panel__eyebrow {
   margin: 0 0 0.42rem;
   color: #8f99ec;
@@ -784,6 +790,265 @@ button:focus-visible {
   font-size: 0.64rem;
 }
 
+.conversation,
+.activity-pane {
+  display: grid;
+  min-height: 0;
+}
+
+.conversation {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  height: 100%;
+}
+
+.conversation__header,
+.activity-pane,
+.composer {
+  padding: 1rem;
+}
+
+.conversation__header p,
+.activity-pane > p {
+  margin: 0.35rem 0 0;
+  color: #8b91a0;
+  font-size: 0.72rem;
+}
+
+.conversation__transcript {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 1rem 1rem;
+  display: grid;
+  align-content: start;
+  gap: 0.7rem;
+}
+
+.stream-card {
+  padding: 0.75rem 0.85rem;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 3%);
+}
+
+.stream-card header,
+.stream-card summary {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  color: #d7dbe6;
+  font-size: 0.72rem;
+}
+
+.stream-card header span,
+.stream-card summary span {
+  color: #7f8593;
+  font-size: 0.62rem;
+}
+
+.stream-card--user {
+  background: rgb(126 139 255 / 7%);
+}
+
+.stream-card--thought {
+  color: #9aa0ae;
+}
+
+.stream-card--running {
+  border-color: rgb(126 139 255 / 22%);
+}
+
+.stream-card--failed,
+.stream-card--error {
+  border-color: rgb(231 107 107 / 24%);
+  background: rgb(231 107 107 / 7%);
+}
+
+.stream-card--completed {
+  border-color: rgb(71 200 140 / 18%);
+}
+
+.stream-card__plain,
+.markdown p,
+.markdown li {
+  margin: 0.45rem 0 0;
+  color: #d5d8e2;
+  font-size: 0.8rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
+
+.stream-card__terminal,
+.markdown pre {
+  margin: 0.55rem 0 0;
+  max-height: 12rem;
+  overflow: auto;
+  padding: 0.65rem;
+  border-radius: 8px;
+  background: #0b0c10;
+  color: #d7dbe4;
+  font-size: 0.7rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.markdown a {
+  color: #aab4ff;
+}
+
+.markdown code {
+  font-size: 0.74rem;
+}
+
+.composer {
+  border-top: 1px solid rgb(255 255 255 / 6%);
+  background: rgb(10 11 14 / 55%);
+}
+
+.composer__meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  margin-bottom: 0.45rem;
+  color: #7d8391;
+  font-size: 0.62rem;
+}
+
+.composer__state--working,
+.composer__state--waiting,
+.composer__state--cancelling {
+  color: #b7bef7;
+}
+
+.composer__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.composer textarea {
+  width: 100%;
+  min-height: 5.5rem;
+  resize: vertical;
+  padding: 0.7rem 0.75rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 10px;
+  color: #edf0f8;
+  background: rgb(255 255 255 / 4%);
+}
+
+.composer textarea:disabled {
+  opacity: 0.55;
+}
+
+.composer__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 0.6rem;
+}
+
+.control-stack,
+.command-list,
+.activity-tools,
+.plan-list,
+.usage-list {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.control-stack {
+  margin: 0.9rem 0;
+}
+
+.control-stack label,
+.control-toggle {
+  display: grid;
+  gap: 0.28rem;
+  color: #8b91a0;
+  font-size: 0.62rem;
+}
+
+.control-stack select,
+.control-stack input {
+  min-height: 34px;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid rgb(255 255 255 / 8%);
+  border-radius: 8px;
+  color: #edf0f8;
+  background: rgb(255 255 255 / 4%);
+}
+
+.control-toggle {
+  grid-template-columns: auto 1fr;
+  align-items: center;
+}
+
+.command-list {
+  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  margin-bottom: 0.9rem;
+}
+
+.chip-button {
+  min-height: 30px;
+  border: 1px solid rgb(139 151 238 / 14%);
+  border-radius: 999px;
+  color: #aab2ea;
+  background: rgb(126 139 255 / 6%);
+  font-size: 0.62rem;
+}
+
+.activity-pane__muted {
+  margin: 0.8rem 0;
+  color: #737987;
+  font-size: 0.68rem;
+}
+
+.activity-tools,
+.plan-list {
+  margin: 0.7rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.activity-tools li,
+.plan-list li {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.45rem 0;
+  border-top: 1px solid rgb(255 255 255 / 5%);
+}
+
+.activity-tools strong,
+.plan-list strong {
+  color: #d7dbe6;
+  font-size: 0.7rem;
+}
+
+.activity-tools small,
+.plan-list small {
+  color: #7f8593;
+  font-size: 0.6rem;
+  text-transform: capitalize;
+}
+
+.usage-list {
+  margin: 0.45rem 0 0;
+}
+
+.usage-list div {
+  display: flex;
+  justify-content: space-between;
+  color: #9aa0ae;
+  font-size: 0.66rem;
+}
+
+.usage-list dd {
+  margin: 0;
+  color: #d7dbe6;
+}
+
 @keyframes pulse {
   0%,
   100% {
@@ -912,5 +1177,35 @@ button:focus-visible {
   .selected-session {
     border-color: rgb(98 111 208 / 22%);
     background: rgb(98 111 208 / 8%);
+  }
+
+  .stream-card,
+  .composer textarea,
+  .control-stack select {
+    border-color: rgb(25 31 46 / 9%);
+    background: rgb(25 31 46 / 3%);
+  }
+
+  .stream-card header,
+  .stream-card summary,
+  .stream-card__plain,
+  .markdown p,
+  .activity-tools strong,
+  .plan-list strong {
+    color: #202534;
+  }
+
+  .composer {
+    background: rgb(248 249 252 / 88%);
+  }
+
+  .composer textarea {
+    color: #1f2430;
+  }
+
+  .stream-card__terminal,
+  .markdown pre {
+    background: #eef0f6;
+    color: #202534;
   }
 }
