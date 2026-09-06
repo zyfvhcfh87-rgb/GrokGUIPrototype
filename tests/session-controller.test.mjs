@@ -227,3 +227,66 @@ test("opening prefers resume when the runtime advertises it", async () => {
   assert.equal(harness.calls[0].command, "resume");
   assert.equal(controller.getState().selectedSessionId, "session-001");
 });
+
+async function waitUntil(predicate) {
+  for (let attempt = 0; attempt < 25; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await Promise.resolve();
+  }
+  throw new Error("condition was not met");
+}
+
+test("binding a workspace restores a remembered session through resume", async () => {
+  const { controller, harness } = await readyController();
+
+  await controller.setWorkspace({ path: "C:\\work" }, "session-001");
+  await waitUntil(() => controller.getState().selectedSessionId === "session-001");
+
+  assert.equal(
+    harness.calls.some(
+      (call) =>
+        call.command === "resume" &&
+        call.request.sessionId === "session-001" &&
+        call.request.workspace === "C:\\work",
+    ),
+    true,
+  );
+});
+
+test("a missing restore target does not resume a different session", async () => {
+  const { controller, harness } = await readyController();
+
+  await controller.setWorkspace({ path: "C:\\work" }, "session-missing");
+  await waitUntil(() => controller.getState().listKind === "ready");
+
+  assert.equal(
+    harness.calls.some((call) => call.command === "resume" || call.command === "load"),
+    false,
+  );
+  assert.equal(controller.getState().selectedSessionId, null);
+});
+
+test("a newer runtime generation clears live selection then resumes the same session", async () => {
+  const { controller, harness } = await readyController();
+  await controller.setWorkspace({ path: "C:\\work" });
+  await controller.openSession("session-001");
+  harness.calls.length = 0;
+
+  harness.emit({
+    generation: 2,
+    sequence: 1,
+    event: { type: "runtime_state_changed", state: "connecting" },
+  });
+  await waitUntil(() =>
+    harness.calls.some(
+      (call) =>
+        call.command === "resume" &&
+        call.request.sessionId === "session-001" &&
+        call.request.workspace === "C:\\work",
+    ),
+  );
+
+  assert.equal(controller.getState().selectedSessionId, "session-001");
+});

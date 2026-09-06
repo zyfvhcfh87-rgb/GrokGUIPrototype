@@ -67,7 +67,7 @@ test("setup controller opens and removes recent workspaces through reviewed comm
     onEvent: async () => () => {},
     setupStatus: async () => setup,
     listRecentWorkspaces: async () => ({
-      workspaces: [{ path: "C:\\old", available: false }],
+      workspaces: [{ path: "C:\\old", available: false, lastSessionId: null }],
     }),
     runtimeSnapshot: async () => ({ ...snapshot, state: "ready" }),
     validateWorkspace: async ({ path }) => ({ path }),
@@ -170,4 +170,92 @@ test("preference failure warns without discarding the selected workspace", async
   assert.deepEqual(selected, { path: "C:\\work" });
   assert.deepEqual(controller.getState().selectedWorkspace, selected);
   assert.equal(controller.getState().workspaceFailure?.code, "preferences_unavailable");
+});
+
+test("setup controller restores the first available recent workspace after the runtime is ready", async () => {
+  const calls = [];
+  const controller = createSetupController({
+    onEvent: async () => () => {},
+    setupStatus: async () => setup,
+    listRecentWorkspaces: async () => ({
+      workspaces: [
+        { path: "C:\\gone", available: false, lastSessionId: "session-old" },
+        { path: "C:\\work", available: true, lastSessionId: "session-001" },
+      ],
+    }),
+    runtimeSnapshot: async () => snapshot,
+    startRuntime: async () => ({ ...snapshot, generation: 1, lastSequence: 2, state: "ready" }),
+    validateWorkspace: async ({ path }) => {
+      calls.push(path);
+      return { path };
+    },
+  });
+
+  await controller.initialize();
+
+  assert.deepEqual(calls, ["C:\\work"]);
+  assert.deepEqual(controller.getState().selectedWorkspace, { path: "C:\\work" });
+});
+
+test("retry uses restart when the runtime has failed", async () => {
+  const calls = [];
+  const controller = createSetupController({
+    onEvent: async () => () => {},
+    setupStatus: async () => setup,
+    listRecentWorkspaces: async () => ({ workspaces: [] }),
+    runtimeSnapshot: async () => ({ ...snapshot, state: "failed" }),
+    startRuntime: async () => {
+      calls.push("start");
+      return { ...snapshot, generation: 1, lastSequence: 1, state: "ready" };
+    },
+    restartRuntime: async () => {
+      calls.push("restart");
+      return { ...snapshot, generation: 2, lastSequence: 1, state: "ready" };
+    },
+  });
+  await controller.initialize();
+  assert.equal(controller.getState().runtimeState, "failed");
+
+  await controller.retry();
+
+  assert.deepEqual(calls, ["restart"]);
+  assert.equal(controller.getState().runtimeState, "ready");
+});
+
+test("retry uses start when the runtime is disconnected", async () => {
+  const calls = [];
+  let listener = null;
+  const controller = createSetupController({
+    onEvent: async (next) => {
+      listener = next;
+      return () => {};
+    },
+    setupStatus: async () => setup,
+    listRecentWorkspaces: async () => ({ workspaces: [] }),
+    runtimeSnapshot: async () => ({
+      ...snapshot,
+      generation: 1,
+      lastSequence: 1,
+      state: "ready",
+    }),
+    startRuntime: async () => {
+      calls.push("start");
+      return { ...snapshot, generation: 2, lastSequence: 1, state: "ready" };
+    },
+    restartRuntime: async () => {
+      calls.push("restart");
+      return { ...snapshot, generation: 3, lastSequence: 1, state: "ready" };
+    },
+  });
+  await controller.initialize();
+  listener({
+    generation: 1,
+    sequence: 2,
+    event: { type: "runtime_state_changed", state: "disconnected" },
+  });
+  assert.equal(controller.getState().runtimeState, "disconnected");
+
+  await controller.retry();
+
+  assert.deepEqual(calls, ["start"]);
 });

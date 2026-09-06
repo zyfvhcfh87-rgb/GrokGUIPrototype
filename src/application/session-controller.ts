@@ -70,9 +70,11 @@ export function createSessionController(bridge: SessionControllerBridge) {
   let lifecycle = 0;
   let listToken = 0;
   let generation = 0;
+  let pendingRestoreId: string | null = null;
   const closedIds = new Set<string>();
   const failedIds = new Set<string>();
   const listeners = new Set<(state: SessionControllerState) => void>();
+  let restoreListedSession = (_sessions: SessionRow[]): void => {};
 
   const publish = (patch: Partial<SessionControllerState>) => {
     state = { ...state, ...patch };
@@ -154,6 +156,7 @@ export function createSessionController(bridge: SessionControllerBridge) {
         truncated: page.truncated,
         failure: null,
       });
+      restoreListedSession(scoped);
     } catch (error) {
       if (token !== listToken || state.workspace !== workspace) {
         return;
@@ -173,11 +176,14 @@ export function createSessionController(bridge: SessionControllerBridge) {
       generation = envelope.generation;
       closedIds.clear();
       failedIds.clear();
+      pendingRestoreId = state.selectedSessionId ?? pendingRestoreId;
       if (state.workspace !== null) {
         publish({
           selectedSessionId: null,
           selectedSession: null,
           listKind: "stale",
+          opening: false,
+          creating: false,
         });
         void refreshList(++listToken);
       }
@@ -273,6 +279,7 @@ export function createSessionController(bridge: SessionControllerBridge) {
       publish({ failure });
       throw failure;
     }
+    const openedGeneration = generation;
     publish({ opening: true, failure: null });
     try {
       const request = { sessionId, workspace };
@@ -280,11 +287,15 @@ export function createSessionController(bridge: SessionControllerBridge) {
         method === "resume"
           ? await bridge.resumeSession(request)
           : await bridge.loadSession(request);
-      if (state.workspace !== workspace) {
+      if (state.workspace !== workspace || generation !== openedGeneration) {
+        publish({ opening: false });
         return session;
       }
       closedIds.delete(sessionId);
       failedIds.delete(sessionId);
+      if (pendingRestoreId === session.sessionId) {
+        pendingRestoreId = null;
+      }
       applyRows(state.sessions, {
         selectedSessionId: session.sessionId,
         selectedSession: session,
@@ -293,6 +304,9 @@ export function createSessionController(bridge: SessionControllerBridge) {
       return session;
     } catch (error) {
       failedIds.add(sessionId);
+      if (pendingRestoreId === sessionId) {
+        pendingRestoreId = null;
+      }
       const failure = applicationError(
         error,
         method === "resume"
@@ -301,6 +315,26 @@ export function createSessionController(bridge: SessionControllerBridge) {
       );
       applyRows(state.sessions, { opening: false, failure });
       throw failure;
+    }
+  };
+
+  restoreListedSession = (sessions: SessionRow[]) => {
+    const sessionId = pendingRestoreId;
+    if (sessionId === null || state.opening || state.creating) {
+      return;
+    }
+    if (!sessions.some((session) => session.sessionId === sessionId)) {
+      if (state.listKind === "ready" || state.listKind === "empty") {
+        pendingRestoreId = null;
+      }
+      return;
+    }
+    if (state.capabilities?.resume) {
+      void openWith(sessionId, "resume").catch(() => undefined);
+      return;
+    }
+    if (state.capabilities?.load) {
+      void openWith(sessionId, "load").catch(() => undefined);
     }
   };
 
@@ -334,9 +368,21 @@ export function createSessionController(bridge: SessionControllerBridge) {
         publish({ listKind: "unavailable" });
       }
     },
-    setWorkspace: async (workspace: Workspace | null) => {
+    setWorkspace: async (workspace: Workspace | null, restoreSessionId?: string | null) => {
       const path = workspace?.path ?? null;
+      const restoreId =
+        restoreSessionId !== undefined && restoreSessionId !== null && restoreSessionId !== ""
+          ? restoreSessionId
+          : null;
       if (path === state.workspace) {
+        if (
+          restoreId !== null &&
+          state.selectedSessionId === null &&
+          pendingRestoreId === null
+        ) {
+          pendingRestoreId = restoreId;
+          restoreListedSession(state.sessions);
+        }
         return;
       }
       const token = ++listToken;
@@ -346,6 +392,7 @@ export function createSessionController(bridge: SessionControllerBridge) {
         (state.capabilities?.list ?? false);
       closedIds.clear();
       failedIds.clear();
+      pendingRestoreId = restoreId;
       publish({
         workspace: path,
         sessions: [],
