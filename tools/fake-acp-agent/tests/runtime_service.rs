@@ -161,6 +161,17 @@ async fn a_crashed_runtime_reports_failure_and_can_restart_cleanly() {
         panic!("expected a session page");
     };
     assert_eq!(sessions.sessions[0].session_id, session.session_id);
+    let RuntimeResponse::Session(resumed) = runtime
+        .execute(RuntimeCommand::ResumeSession {
+            session_id: session.session_id.clone(),
+            workspace: workspace.clone(),
+        })
+        .await
+        .expect("restarted runtime should resume the persisted session")
+    else {
+        panic!("expected a resumed session");
+    };
+    assert_eq!(resumed.session_id, session.session_id);
     runtime.stop().await.expect("restarted runtime should stop");
 }
 

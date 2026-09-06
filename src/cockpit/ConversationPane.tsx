@@ -12,6 +12,7 @@ export function ConversationPane({
   onDraftChange,
   onSend,
   onCancel,
+  onRecover,
   onOpenUrl,
 }: {
   presentation: ConversationPresentation;
@@ -19,6 +20,7 @@ export function ConversationPane({
   onDraftChange: (value: string) => void;
   onSend: () => void;
   onCancel: () => void;
+  onRecover: () => void;
   onOpenUrl: (href: string) => void;
 }) {
   const { composer } = presentation;
@@ -45,6 +47,11 @@ export function ConversationPane({
         <p className="shell-panel__eyebrow">Conversation</p>
         <h1 id="conversation-heading">{presentation.heading}</h1>
         <p>{presentation.detail}</p>
+        {presentation.canRecover ? (
+          <button className="button button--primary" type="button" onClick={onRecover}>
+            Recover
+          </button>
+        ) : null}
       </header>
 
       <div className="conversation__transcript" aria-live="polite">

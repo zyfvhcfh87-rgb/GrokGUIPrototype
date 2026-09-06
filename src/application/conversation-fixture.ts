@@ -102,6 +102,7 @@ function dispatchFixtureCommand(input: {
       };
     case "runtime_snapshot":
     case "runtime_start":
+    case "runtime_restart":
       return {
         generation,
         lastSequence: sequence,
@@ -110,7 +111,9 @@ function dispatchFixtureCommand(input: {
       };
     case "workspace_recent_list":
       return {
-        workspaces: [{ path: FIXTURE_WORKSPACE, available: true }],
+        workspaces: [
+          { path: FIXTURE_WORKSPACE, available: true, lastSessionId: FIXTURE_SESSION_ID },
+        ],
       };
     case "workspace_validate":
     case "workspace_pick":

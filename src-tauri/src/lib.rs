@@ -14,8 +14,8 @@ use application_contract::{
     session_from_response, sessions_from_response,
 };
 use grok_runtime::{
-    GrokRuntime, RedactedDiagnostic, ResolveGrokExecutableError, RuntimeError, RuntimeErrorCode,
-    RuntimeEvent, RuntimeState, resolve_grok_executable,
+    GrokRuntime, RedactedDiagnostic, ResolveGrokExecutableError, RuntimeCommand, RuntimeError,
+    RuntimeErrorCode, RuntimeEvent, RuntimeState, resolve_grok_executable,
 };
 use tauri::{Emitter as _, Manager as _};
 
@@ -130,6 +130,20 @@ impl WorkspaceManager {
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         store.remove(&path).map_err(ApplicationErrorDto::from)?;
         RecentWorkspaceListDto::from_recent(store.recent().map_err(ApplicationErrorDto::from)?)
+    }
+
+    fn remember_session(&self, workspace: PathBuf, session_id: &str) {
+        self.store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remember_session(&workspace, session_id);
+    }
+
+    fn forget_session(&self, session_id: &str) {
+        self.store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .forget_session(session_id);
     }
 }
 
@@ -307,14 +321,23 @@ async fn runtime_restart(
 #[tauri::command]
 async fn session_new(
     manager: tauri::State<'_, RuntimeManager>,
+    workspaces: tauri::State<'_, WorkspaceManager>,
     request: NewSessionRequestDto,
 ) -> Result<SessionDto, ApplicationErrorDto> {
-    let response = manager
-        .runtime()?
-        .execute(request.into_runtime_command()?)
-        .await
-        .map_err(ApplicationErrorDto::from)?;
-    session_from_response(response)
+    let command = request.into_runtime_command()?;
+    let workspace = match &command {
+        RuntimeCommand::NewSession { workspace } => workspace.clone(),
+        _ => return Err(ApplicationErrorDto::unexpected_response()),
+    };
+    let session = session_from_response(
+        manager
+            .runtime()?
+            .execute(command)
+            .await
+            .map_err(ApplicationErrorDto::from)?,
+    )?;
+    workspaces.remember_session(workspace, &session.session_id);
+    Ok(session)
 }
 
 #[tauri::command]
@@ -333,44 +356,59 @@ async fn session_list(
 #[tauri::command]
 async fn session_load(
     manager: tauri::State<'_, RuntimeManager>,
+    workspaces: tauri::State<'_, WorkspaceManager>,
     request: SessionWorkspaceRequestDto,
 ) -> Result<SessionDto, ApplicationErrorDto> {
-    let command = request.into_load_command()?;
-    let response = manager
-        .runtime()?
-        .execute(command)
-        .await
-        .map_err(ApplicationErrorDto::from)?;
-    session_from_response(response)
+    remember_opened_session(manager, workspaces, request.into_load_command()?).await
 }
 
 #[tauri::command]
 async fn session_resume(
     manager: tauri::State<'_, RuntimeManager>,
+    workspaces: tauri::State<'_, WorkspaceManager>,
     request: SessionWorkspaceRequestDto,
 ) -> Result<SessionDto, ApplicationErrorDto> {
-    let command = request.into_resume_command()?;
-    let response = manager
-        .runtime()?
-        .execute(command)
-        .await
-        .map_err(ApplicationErrorDto::from)?;
-    session_from_response(response)
+    remember_opened_session(manager, workspaces, request.into_resume_command()?).await
+}
+
+async fn remember_opened_session(
+    manager: tauri::State<'_, RuntimeManager>,
+    workspaces: tauri::State<'_, WorkspaceManager>,
+    command: RuntimeCommand,
+) -> Result<SessionDto, ApplicationErrorDto> {
+    let workspace = match &command {
+        RuntimeCommand::LoadSession { workspace, .. }
+        | RuntimeCommand::ResumeSession { workspace, .. } => workspace.clone(),
+        _ => return Err(ApplicationErrorDto::unexpected_response()),
+    };
+    let session = session_from_response(
+        manager
+            .runtime()?
+            .execute(command)
+            .await
+            .map_err(ApplicationErrorDto::from)?,
+    )?;
+    workspaces.remember_session(workspace, &session.session_id);
+    Ok(session)
 }
 
 #[tauri::command]
 async fn session_close(
     manager: tauri::State<'_, RuntimeManager>,
+    workspaces: tauri::State<'_, WorkspaceManager>,
     request: SessionRequestDto,
 ) -> Result<AcknowledgementDto, ApplicationErrorDto> {
+    let session_id = request.validated_session_id()?;
     let response = manager
         .runtime()?
-        .execute(grok_runtime::RuntimeCommand::CloseSession {
-            session_id: request.validated_session_id()?,
+        .execute(RuntimeCommand::CloseSession {
+            session_id: session_id.clone(),
         })
         .await
         .map_err(ApplicationErrorDto::from)?;
-    acknowledgement_from_response(response)
+    let acknowledgement = acknowledgement_from_response(response)?;
+    workspaces.forget_session(&session_id);
+    Ok(acknowledgement)
 }
 
 #[tauri::command]

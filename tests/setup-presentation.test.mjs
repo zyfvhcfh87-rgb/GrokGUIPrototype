@@ -114,8 +114,8 @@ test("workspace presentation distinguishes empty, ready, and stale recents", () 
   });
   assert.deepEqual(
     describeWorkspaceList([
-      { path: "C:\\work", available: true },
-      { path: "C:\\old", available: false },
+      { path: "C:\\work", available: true, lastSessionId: null },
+      { path: "C:\\old", available: false, lastSessionId: null },
     ]),
     { kind: "mixed", availableCount: 1, staleCount: 1 },
   );

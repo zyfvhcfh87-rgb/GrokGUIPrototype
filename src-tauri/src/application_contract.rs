@@ -84,6 +84,7 @@ pub struct WorkspaceDto {
 pub struct RecentWorkspaceDto {
     pub path: String,
     pub available: bool,
+    pub last_session_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -955,6 +956,11 @@ impl TryFrom<crate::workspace::RecentWorkspace> for RecentWorkspaceDto {
         Ok(Self {
             path: path.to_owned(),
             available: value.available,
+            last_session_id: value.last_session_id.filter(|session_id| {
+                !session_id.is_empty()
+                    && session_id.len() <= MAX_IDENTIFIER_BYTES
+                    && !session_id.chars().any(char::is_control)
+            }),
         })
     }
 }
@@ -2438,7 +2444,7 @@ mod tests {
         assert_fields!(
             "recentWorkspace",
             RecentWorkspaceDto,
-            json!({ "path": "C:\\work", "available": true })
+            json!({ "path": "C:\\work", "available": true, "lastSessionId": null })
         );
         assert_fields!(
             "recentWorkspaceList",

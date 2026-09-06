@@ -70,10 +70,17 @@ export function App({
     conversation.setRuntime(state.runtimeState, state.capabilities);
   }, [conversation, sessions, state.capabilities, state.runtimeState]);
 
+  const restoreSessionId =
+    state.selectedWorkspace === null
+      ? null
+      : (state.recentWorkspaces.find(
+          (workspace) => workspace.path === state.selectedWorkspace?.path,
+        )?.lastSessionId ?? null);
+
   useEffect(() => {
-    void sessions.setWorkspace(state.selectedWorkspace);
+    void sessions.setWorkspace(state.selectedWorkspace, restoreSessionId);
     setSessionFocus(0);
-  }, [sessions, state.selectedWorkspace]);
+  }, [restoreSessionId, sessions, state.selectedWorkspace]);
 
   useEffect(() => {
     conversation.setSession(sessionState.selectedSession);
@@ -383,6 +390,7 @@ export function App({
               onDraftChange={conversation.setDraft}
               onSend={() => void conversation.sendPrompt().catch(() => undefined)}
               onCancel={() => void conversation.cancelPrompt().catch(() => undefined)}
+              onRecover={() => void controller.retry()}
               onOpenUrl={(href) => void conversation.openExternalUrl(href).catch(() => undefined)}
             />
           ) : (

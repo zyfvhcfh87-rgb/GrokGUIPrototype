@@ -19,6 +19,7 @@ export type SetupControllerBridge = {
   listRecentWorkspaces(): Promise<RecentWorkspaceList>;
   runtimeSnapshot(): Promise<RuntimeSnapshot>;
   startRuntime?(): Promise<RuntimeSnapshot>;
+  restartRuntime?(): Promise<RuntimeSnapshot>;
   pickWorkspace?(): Promise<Workspace | null>;
   validateWorkspace?(request: WorkspaceRequest): Promise<Workspace>;
   removeRecentWorkspace?(request: WorkspaceRequest): Promise<RecentWorkspaceList>;
@@ -53,6 +54,7 @@ export function createSetupController(bridge: SetupControllerBridge) {
   let orderedState = initialApplicationState();
   let unlisten: Unlisten | null = null;
   let lifecycle = 0;
+  let restoredWorkspace = false;
   const listeners = new Set<(state: SetupControllerState) => void>();
 
   const publish = (patch: Partial<SetupControllerState>) => {
@@ -118,24 +120,65 @@ export function createSetupController(bridge: SetupControllerBridge) {
     }
   };
 
-  const connect = async () => {
-    if (bridge.startRuntime === undefined) {
+  const restoreWorkspaceIfNeeded = async () => {
+    if (restoredWorkspace || state.selectedWorkspace !== null) {
+      restoredWorkspace = true;
+      return;
+    }
+    if (state.runtimeState !== "ready" || bridge.validateWorkspace === undefined) {
+      return;
+    }
+    const firstAvailable = state.recentWorkspaces.find((workspace) => workspace.available);
+    restoredWorkspace = true;
+    if (firstAvailable === undefined) {
       return;
     }
     try {
-      const snapshot = await bridge.startRuntime();
-      publish({
-        runtimeState: acceptSnapshot(snapshot),
-        capabilities: snapshot.capabilities,
-        failure: null,
-      });
+      const selected = await bridge.validateWorkspace({ path: firstAvailable.path });
+      if (state.selectedWorkspace === null) {
+        publish({ selectedWorkspace: selected, workspaceFailure: null });
+      }
+      await refreshRecent();
     } catch (error) {
       publish({
-        runtimeState: "failed",
-        failure: applicationError(error, "Grok Build could not be started."),
+        workspaceFailure: applicationError(error, "That workspace is no longer available."),
       });
     }
   };
+
+  const connectWith = async (method: "start" | "restart") => {
+    const run =
+      method === "restart" && bridge.restartRuntime !== undefined
+        ? bridge.restartRuntime
+        : bridge.startRuntime;
+    if (run === undefined) {
+      return;
+    }
+    try {
+      const snapshot = await run();
+      const runtimeState = acceptSnapshot(snapshot);
+      publish({
+        runtimeState,
+        capabilities: snapshot.capabilities,
+        failure: null,
+      });
+      if (runtimeState === "ready") {
+        await restoreWorkspaceIfNeeded();
+      }
+    } catch (error) {
+      publish({
+        runtimeState: "failed",
+        failure: applicationError(
+          error,
+          method === "restart"
+            ? "Grok Build could not be recovered."
+            : "Grok Build could not be started.",
+        ),
+      });
+    }
+  };
+
+  const connect = () => connectWith("start");
 
   return {
     getState: () => state,
@@ -200,6 +243,8 @@ export function createSetupController(bridge: SetupControllerBridge) {
         });
         if (setup.runtimeAvailable && snapshot?.state === "disconnected") {
           await connect();
+        } else if (state.runtimeState === "ready") {
+          await restoreWorkspaceIfNeeded();
         }
       } catch (error) {
         if (currentLifecycle !== lifecycle) {
@@ -212,7 +257,7 @@ export function createSetupController(bridge: SetupControllerBridge) {
         });
       }
     },
-    retry: connect,
+    retry: () => connectWith(state.runtimeState === "failed" ? "restart" : "start"),
     pickWorkspace: async () => {
       if (bridge.pickWorkspace === undefined) {
         return null;

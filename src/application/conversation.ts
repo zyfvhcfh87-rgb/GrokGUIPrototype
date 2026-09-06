@@ -127,6 +127,7 @@ export type ConversationPresentation = {
   controls: SessionControlPresentation;
   activity: ActivityPresentation;
   failure: ApplicationError | null;
+  canRecover: boolean;
 };
 
 export function projectConversation(input: {
@@ -168,6 +169,7 @@ export function projectConversation(input: {
     runtimeFailure: input.runtimeFailure,
   });
   const activity = describeActivity(input.sessionView);
+  const canRecover = canRecoverConversation(input);
 
   if (input.sessionId === null) {
     return {
@@ -180,6 +182,7 @@ export function projectConversation(input: {
       controls,
       activity,
       failure: input.failure,
+      canRecover: false,
     };
   }
   if (input.needsResync) {
@@ -193,6 +196,7 @@ export function projectConversation(input: {
       controls,
       activity,
       failure: input.failure,
+      canRecover,
     };
   }
   if (input.sessionView?.state === "closed") {
@@ -206,22 +210,30 @@ export function projectConversation(input: {
       controls,
       activity,
       failure: input.failure,
+      canRecover: false,
     };
   }
-  if (input.sessionView?.state === "failed" || input.runtimeState === "failed") {
+  if (
+    input.sessionView?.state === "failed" ||
+    input.runtimeState === "failed" ||
+    input.runtimeState === "disconnected"
+  ) {
     return {
       kind: "failed",
-      heading: "Conversation failed",
+      heading: input.runtimeState === "disconnected" ? "Disconnected" : "Conversation failed",
       detail:
         input.failure?.diagnostic ??
         input.runtimeFailure?.diagnostic ??
-        "The session or runtime reported a failure.",
+        (input.runtimeState === "disconnected"
+          ? "Reconnect to continue this session."
+          : "The session or runtime reported a failure."),
       sessionState: input.sessionView?.state ?? null,
       cards,
       composer,
       controls,
       activity,
       failure: input.failure,
+      canRecover,
     };
   }
   if (cards.filter((card) => card.type !== "error").length === 0) {
@@ -235,6 +247,7 @@ export function projectConversation(input: {
       controls,
       activity,
       failure: input.failure,
+      canRecover,
     };
   }
   return {
@@ -247,7 +260,28 @@ export function projectConversation(input: {
     controls,
     activity,
     failure: input.failure,
+    canRecover,
   };
+}
+
+export function canRecoverConversation(input: {
+  runtimeState: RuntimeState;
+  failure: ApplicationError | null;
+  runtimeFailure: { diagnostic: string; recoverable: boolean } | null;
+}): boolean {
+  if (input.runtimeState === "disconnected") {
+    return true;
+  }
+  if (input.runtimeState !== "failed") {
+    return false;
+  }
+  if (input.failure?.code === "unsupported_protocol") {
+    return false;
+  }
+  if (input.runtimeFailure !== null && !input.runtimeFailure.recoverable) {
+    return false;
+  }
+  return input.failure?.recoverable ?? true;
 }
 
 export function describeComposer(input: {

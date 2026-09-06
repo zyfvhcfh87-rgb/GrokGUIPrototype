@@ -31,7 +31,7 @@
     "workspaceRequest": ["path"],
     "openExternalUrlRequest": ["url"],
     "workspace": ["path"],
-    "recentWorkspace": ["available", "path"],
+    "recentWorkspace": ["available", "lastSessionId", "path"],
     "recentWorkspaceList": ["workspaces"],
     "newSessionRequest": ["workspace"],
     "listSessionsRequest": ["cursor", "workspace"],

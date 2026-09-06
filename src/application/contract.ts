@@ -322,7 +322,11 @@ export type ApplicationError = {
 export type WorkspaceRequest = { path: string };
 export type OpenExternalUrlRequest = { url: string };
 export type Workspace = { path: string };
-export type RecentWorkspace = { path: string; available: boolean };
+export type RecentWorkspace = {
+  path: string;
+  available: boolean;
+  lastSessionId: string | null;
+};
 export type RecentWorkspaceList = { workspaces: RecentWorkspace[] };
 export type NewSessionRequest = { workspace: string };
 export type ListSessionsRequest = {
@@ -540,7 +544,7 @@ export const APPLICATION_DTO_FIELDS = {
   workspaceRequest: fieldsOf<WorkspaceRequest>()(["path"]),
   openExternalUrlRequest: fieldsOf<OpenExternalUrlRequest>()(["url"]),
   workspace: fieldsOf<Workspace>()(["path"]),
-  recentWorkspace: fieldsOf<RecentWorkspace>()(["available", "path"]),
+  recentWorkspace: fieldsOf<RecentWorkspace>()(["available", "lastSessionId", "path"]),
   recentWorkspaceList: fieldsOf<RecentWorkspaceList>()(["workspaces"]),
   newSessionRequest: fieldsOf<NewSessionRequest>()(["workspace"]),
   listSessionsRequest: fieldsOf<ListSessionsRequest>()(["cursor", "workspace"]),

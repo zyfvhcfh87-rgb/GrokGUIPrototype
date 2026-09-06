@@ -322,4 +322,67 @@ test("the conversation surface stays presentable when a session is selected", ()
   });
   assert.equal(presentation.kind, "empty");
   assert.equal(presentation.composer.kind, "ready");
+  assert.equal(presentation.canRecover, false);
+});
+
+test("failed and disconnected conversations expose a recoverable action", () => {
+  const failed = projectConversation({
+    sessionId: "session-1",
+    session: null,
+    sessionView: initialSessionForTest(),
+    capabilities,
+    runtimeState: "failed",
+    modelCatalog: null,
+    currentModeId: null,
+    configOptions: [],
+    pendingUserMessages: [],
+    sending: false,
+    cancelling: false,
+    failure: null,
+    needsResync: false,
+    runtimeFailure: { diagnostic: "process lost", recoverable: true },
+  });
+  assert.equal(failed.kind, "failed");
+  assert.equal(failed.canRecover, true);
+
+  const disconnected = projectConversation({
+    sessionId: "session-1",
+    session: null,
+    sessionView: initialSessionForTest(),
+    capabilities,
+    runtimeState: "disconnected",
+    modelCatalog: null,
+    currentModeId: null,
+    configOptions: [],
+    pendingUserMessages: [],
+    sending: false,
+    cancelling: false,
+    failure: null,
+    needsResync: false,
+    runtimeFailure: null,
+  });
+  assert.equal(disconnected.kind, "failed");
+  assert.equal(disconnected.canRecover, true);
+
+  const incompatible = projectConversation({
+    sessionId: "session-1",
+    session: null,
+    sessionView: initialSessionForTest(),
+    capabilities,
+    runtimeState: "failed",
+    modelCatalog: null,
+    currentModeId: null,
+    configOptions: [],
+    pendingUserMessages: [],
+    sending: false,
+    cancelling: false,
+    failure: {
+      code: "unsupported_protocol",
+      diagnostic: "ACP protocol v1 was not negotiated",
+      recoverable: false,
+    },
+    needsResync: false,
+    runtimeFailure: { diagnostic: "incompatible", recoverable: false },
+  });
+  assert.equal(incompatible.canRecover, false);
 });

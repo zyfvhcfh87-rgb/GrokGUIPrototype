@@ -814,6 +814,10 @@ button:focus-visible {
   font-size: 0.72rem;
 }
 
+.conversation__header .button {
+  margin-top: 0.75rem;
+}
+
 .conversation__transcript {
   min-height: 0;
   overflow: auto;
