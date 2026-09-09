@@ -1,27 +1,27 @@
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { transformWithOxc } from "vite";
 import test from "node:test";
 import { initialApplicationState, reduceApplicationEvent } from "../src/application/state.ts";
 
-// Use the project's existing React and TypeScript dependencies; no test framework is added.
-let React, renderToStaticMarkup, InteractionPane, ts;
+// Use the project's existing React and Vite dependencies; no test framework is added.
+let React, renderToStaticMarkup, InteractionPane;
 let unavailable = false;
 try {
-  ts = await import("typescript");
   React = await import("react");
   ({ renderToStaticMarkup } = await import("react-dom/server"));
 
 } catch (error) {
   if (error.code !== "ERR_MODULE_NOT_FOUND") throw error;
-  unavailable = "React/TypeScript dependencies are unavailable; run npm ci before component tests.";
+  unavailable = "React dependencies are unavailable; run npm ci before component tests.";
 }
 
 if (!unavailable) {
   const file = new URL("../src/cockpit/InteractionPane.tsx", import.meta.url);
   const source = await readFile(file, "utf8");
-  const output = ts.transpileModule(source, { compilerOptions: {
-    jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.ESNext, target: ts.ScriptTarget.ES2022,
-  } }).outputText.replace(/from "([^"]+)"/gu, (_, specifier) =>
+  const output = (await transformWithOxc(source, file.pathname, {
+    jsx: { runtime: "automatic" },
+  })).code.replace(/from "([^"]+)"/gu, (_, specifier) =>
     `from ${JSON.stringify(specifier.startsWith(".") ? new URL(specifier, file).href : import.meta.resolve(specifier))}`);
   ({ InteractionPane } = await import(`data:text/javascript;base64,${Buffer.from(output).toString("base64")}`));
 }

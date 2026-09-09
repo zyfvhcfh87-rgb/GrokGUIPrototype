@@ -1851,12 +1851,17 @@ impl PermissionScopeDto {
                     command,
                     working_directory,
                     affected_paths: {
-                        if affected_paths.len() > 64 { return None; }
-                        affected_paths.into_iter().map(|path| {
-                            let value = path.to_str()?.to_owned();
-                            validate_output_text(&value, MAX_WORKSPACE_PATH_BYTES)?;
-                            Some(value)
-                        }).collect::<Option<Vec<_>>>()?
+                        if affected_paths.len() > 64 {
+                            return None;
+                        }
+                        affected_paths
+                            .into_iter()
+                            .map(|path| {
+                                let value = path.to_str()?.to_owned();
+                                validate_output_text(&value, MAX_WORKSPACE_PATH_BYTES)?;
+                                Some(value)
+                            })
+                            .collect::<Option<Vec<_>>>()?
                     },
                 })
             }
@@ -2089,9 +2094,9 @@ fn validate_token(value: &str, maximum_bytes: usize) -> Result<(), ApplicationEr
 pub fn validate_external_url(value: &str) -> Result<String, ApplicationErrorDto> {
     if value.is_empty()
         || value.len() > MAX_EXTERNAL_URL_BYTES
-        || value
-            .chars()
-            .any(|character| character.is_whitespace() || character.is_control() || character == '\\')
+        || value.chars().any(|character| {
+            character.is_whitespace() || character.is_control() || character == '\\'
+        })
     {
         return Err(ApplicationErrorDto::invalid_external_url());
     }
@@ -3210,8 +3215,7 @@ mod tests {
             "https://example.com/has space",
             &format!("https://example.com/{}", "a".repeat(MAX_EXTERNAL_URL_BYTES)),
         ] {
-            let error =
-                validate_external_url(rejected).expect_err("unsafe URLs must fail closed");
+            let error = validate_external_url(rejected).expect_err("unsafe URLs must fail closed");
             assert_eq!(error.code, ApplicationErrorCodeDto::InvalidRequest);
             assert!(!error.diagnostic.contains(rejected));
             assert!(!error.diagnostic.contains("secret"));

@@ -1,5 +1,3 @@
-#![cfg(windows)]
-
 use std::{
     collections::BTreeMap,
     fs,
@@ -152,7 +150,7 @@ async fn a_crashed_runtime_reports_failure_and_can_restart_cleanly() {
     assert_eq!(restarted.state, RuntimeState::Ready);
     let RuntimeResponse::Sessions(sessions) = runtime
         .execute(RuntimeCommand::ListSessions {
-            workspace: Some(workspace),
+            workspace: Some(workspace.clone()),
             cursor: None,
         })
         .await
@@ -479,8 +477,8 @@ async fn prompt_streams_domain_events_and_accepts_scoped_user_decisions() {
                     kind,
                     PermissionKind::Command {
                         command: "fixture-tool --check fixture.txt".to_owned(),
-                        working_directory: Some(r"C:\fixture-workspace".into()),
-                        affected_paths: vec![r"C:\fixture-workspace\fixture.txt".into()],
+                        working_directory: Some(fixture_permission_workspace()),
+                        affected_paths: vec![fixture_permission_workspace().join("fixture.txt")],
                     }
                 );
                 runtime
@@ -910,7 +908,7 @@ async fn timed_out_close_stays_fail_closed_until_explicit_reactivation() {
         RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
             .args(["lifecycle", "--lifecycle-fault", "hang-close"])
             .auth_method("fixture_auth")
-            .request_timeout(Duration::from_millis(100)),
+            .request_timeout(Duration::from_secs(2)),
     );
     runtime.start().await.expect("runtime should start");
     let workspace = tempfile::tempdir().expect("temporary workspace");
@@ -1120,4 +1118,12 @@ async fn wait_for_stable_heartbeat(path: &Path) {
         }
     }
     panic!("runtime descendant continued after last owner was dropped");
+}
+
+fn fixture_permission_workspace() -> std::path::PathBuf {
+    if cfg!(windows) {
+        r"C:\fixture-workspace".into()
+    } else {
+        "/fixture-workspace".into()
+    }
 }

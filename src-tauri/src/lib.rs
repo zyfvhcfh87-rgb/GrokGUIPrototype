@@ -9,9 +9,9 @@ use application_contract::{
     InteractionKindDto, ListSessionsRequestDto, NewSessionRequestDto, OpenExternalUrlRequestDto,
     PermissionResponseRequestDto, PromptRequestDto, PromptResultDto, RecentWorkspaceListDto,
     RuntimeSnapshotDto, SessionDto, SessionPageDto, SessionRequestDto, SessionWorkspaceRequestDto,
-    SetSessionConfigRequestDto, SetSessionModeRequestDto, SetSessionModelRequestDto, SetupStatusDto,
-    WorkspaceDto, WorkspaceRequestDto, acknowledgement_from_response, prompt_from_response,
-    session_from_response, sessions_from_response,
+    SetSessionConfigRequestDto, SetSessionModeRequestDto, SetSessionModelRequestDto,
+    SetupStatusDto, WorkspaceDto, WorkspaceRequestDto, acknowledgement_from_response,
+    prompt_from_response, session_from_response, sessions_from_response,
 };
 use grok_runtime::{
     GrokRuntime, RedactedDiagnostic, ResolveGrokExecutableError, RuntimeCommand, RuntimeError,
