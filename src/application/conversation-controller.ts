@@ -57,6 +57,7 @@ export type ConversationControllerState = {
   controlBusy: boolean;
   failure: ApplicationError | null;
   pendingUserMessages: StreamChunk[];
+  interactionEpoch: number;
 };
 
 const INITIAL_STATE: ConversationControllerState = {
@@ -74,6 +75,7 @@ const INITIAL_STATE: ConversationControllerState = {
   controlBusy: false,
   failure: null,
   pendingUserMessages: [],
+  interactionEpoch: 0,
 };
 
 export function createConversationController(bridge: ConversationControllerBridge) {
@@ -216,6 +218,7 @@ export function createConversationController(bridge: ConversationControllerBridg
     },
     setRuntime: (runtimeState: RuntimeState, capabilities: RuntimeCapabilities | null) => {
       publish({
+        interactionEpoch: state.interactionEpoch + (runtimeState !== state.runtimeState && ["connecting", "authenticating", "failed", "disconnected"].includes(runtimeState) ? 1 : 0),
         runtimeState,
         capabilities,
         modelCatalog: state.session?.models ?? capabilities?.models ?? state.modelCatalog,
@@ -223,6 +226,7 @@ export function createConversationController(bridge: ConversationControllerBridg
     },
     setSession: (session: Session | null) => {
       publish({
+        interactionEpoch: state.interactionEpoch + (session !== state.session ? 1 : 0),
         sessionId: session?.sessionId ?? null,
         session,
         modelCatalog: session?.models ?? state.modelCatalog,
@@ -303,7 +307,7 @@ export function createConversationController(bridge: ConversationControllerBridg
         publish({ failure });
         throw failure;
       }
-      publish({ cancelling: true, failure: null });
+      publish({ cancelling: true, failure: null, interactionEpoch: state.interactionEpoch + 1 });
       try {
         await bridge.cancelPrompt({ sessionId });
         if (state.sessionId === sessionId) {

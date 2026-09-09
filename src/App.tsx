@@ -3,6 +3,8 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { ApplicationTransport } from "./application/bridge.ts";
 import { createApplicationBridge } from "./application/bridge.ts";
 import { createConversationController } from "./application/conversation-controller.ts";
+import { createInteractionController } from "./application/interaction-controller.ts";
+import type { InteractionContext } from "./application/interactions.ts";
 import { createSessionController } from "./application/session-controller.ts";
 import { createSetupController } from "./application/setup-controller.ts";
 import {
@@ -14,6 +16,7 @@ import { createTauriTransport } from "./application/tauri.ts";
 import appIcon from "./assets/app-icon.svg";
 import { ActivityPane } from "./cockpit/ActivityPane.tsx";
 import { ConversationPane } from "./cockpit/ConversationPane.tsx";
+import { InteractionPane } from "./cockpit/InteractionPane.tsx";
 
 export type AppProps = {
   transport?: ApplicationTransport;
@@ -53,6 +56,23 @@ export function App({
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const sessionState = useSyncExternalStore(sessions.subscribe, sessions.getState);
   const conversationState = useSyncExternalStore(conversation.subscribe, conversation.getState);
+  const readInteractionContext = useMemo(() => (): InteractionContext => {
+    const current = conversation.getState();
+    const navigation = sessions.getState();
+    const setup = controller.getState();
+    return {
+      application: current.application,
+      sessionId: current.sessionId,
+      epoch: current.interactionEpoch,
+      blocked: current.cancelling || navigation.opening || navigation.closing || navigation.creating ||
+        setup.initializing || setup.choosingWorkspace || current.sessionId !== navigation.selectedSessionId ||
+        !["ready", "working", "waiting_for_input"].includes(setup.runtimeState),
+    };
+  }, [controller, conversation, sessions]);
+  const interactions = useMemo(() => createInteractionController(bridge, readInteractionContext), [bridge, readInteractionContext]);
+  const interactionStatuses = useSyncExternalStore(interactions.subscribe, interactions.getState);
+  useEffect(() => { interactions.reconcile(); }, [interactions, conversationState, sessionState, state]);
+  const interactionPane = <InteractionPane context={readInteractionContext()} controller={interactions} statuses={interactionStatuses} />;
 
   useEffect(() => {
     void controller.initialize();
@@ -385,6 +405,7 @@ export function App({
         >
           {hasSession ? (
             <ConversationPane
+              interactions={interactionPane}
               presentation={conversationView}
               draft={conversationState.draft}
               onDraftChange={conversation.setDraft}
@@ -395,6 +416,7 @@ export function App({
             />
           ) : (
             <>
+          {interactionPane}
           <div className={`launch-card launch-card--${launch.kind}`}>
             <div className="launch-card__icon" aria-hidden="true">
               <img src={appIcon} alt="" />

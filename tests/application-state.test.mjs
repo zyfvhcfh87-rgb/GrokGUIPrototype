@@ -194,14 +194,14 @@ test("automatic session and runtime cancellation clears orphaned interactions", 
     initialApplicationState(),
     runtimeEvent(1, 1, "ready"),
   );
-  state = [permission, elicitation].reduce(
+  state = [{ type: "session_activated", sessionId: "session-1" }, permission, elicitation].reduce(
     (current, event, index) =>
       reduceApplicationEvent(current, { generation: 1, sequence: index + 2, event }),
     state,
   );
   state = reduceApplicationEvent(state, {
     generation: 1,
-    sequence: 4,
+    sequence: 5,
     event: { type: "interactions_cleared", sessionId: "session-1" },
   });
   assert.deepEqual(state.sessions["session-1"].permissions, {});
@@ -209,7 +209,7 @@ test("automatic session and runtime cancellation clears orphaned interactions", 
 
   state = reduceApplicationEvent(state, {
     generation: 1,
-    sequence: 5,
+    sequence: 6,
     event: {
       type: "session_state_changed",
       sessionId: "session-1",
@@ -218,14 +218,14 @@ test("automatic session and runtime cancellation clears orphaned interactions", 
   });
   state = reduceApplicationEvent(state, {
     generation: 1,
-    sequence: 6,
+    sequence: 7,
     event: permission,
   });
   assert.deepEqual(state.sessions["session-1"].permissions, {});
 
   state = reduceApplicationEvent(state, {
     generation: 1,
-    sequence: 7,
+    sequence: 8,
     event: {
       type: "elicitation_requested",
       sessionId: null,
@@ -236,7 +236,7 @@ test("automatic session and runtime cancellation clears orphaned interactions", 
   });
   state = reduceApplicationEvent(state, {
     generation: 1,
-    sequence: 8,
+    sequence: 9,
     event: { type: "runtime_state_changed", state: "disconnected" },
   });
   assert.deepEqual(state.runtime.elicitations, {});

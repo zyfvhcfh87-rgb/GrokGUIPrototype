@@ -13,9 +13,8 @@ if (mount === null) {
 const root = mount;
 
 async function render() {
-  const useConversationFixture =
-    import.meta.env.DEV &&
-    new URLSearchParams(window.location.search).get("fixture") === "conversation";
+  const fixture = new URLSearchParams(window.location.search).get("fixture");
+  const useConversationFixture = import.meta.env.DEV && (fixture === "conversation" || fixture === "interactions");
 
   if (useConversationFixture) {
     const { FIXTURE_WORKSPACE, createConversationFixtureTransport } = await import(
@@ -24,7 +23,7 @@ async function render() {
     createRoot(root).render(
       <StrictMode>
         <App
-          transport={createConversationFixtureTransport()}
+          transport={createConversationFixtureTransport(fixture === "interactions")}
           autoWorkspace={FIXTURE_WORKSPACE}
           autoOpenFirstSession
         />

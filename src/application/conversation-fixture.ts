@@ -47,12 +47,16 @@ const fixtureSession = (): Session => ({
   truncated: false,
 });
 
-export function createConversationFixtureTransport(): ApplicationTransport {
+export function createConversationFixtureTransport(showInteractions = false): ApplicationTransport {
   const listeners = new Set<(event: { payload: ApplicationEventEnvelope }) => void>();
   let sequence = 0;
   const generation = 1;
+  const pendingRequestIds = new Set<string>();
 
   const emit = (event: ApplicationEvent) => {
+    if (event.type === "permission_requested" || event.type === "elicitation_requested") pendingRequestIds.add(event.interactionId);
+    if (event.type === "interaction_resolved") pendingRequestIds.delete(event.interactionId);
+    if (event.type === "interactions_cleared") pendingRequestIds.clear();
     sequence += 1;
     const envelope = { generation, sequence, event };
     for (const listener of listeners) {
@@ -69,6 +73,8 @@ export function createConversationFixtureTransport(): ApplicationTransport {
           emit,
           generation,
           sequence,
+          showInteractions,
+          pendingRequestIds,
         }),
       );
     },
@@ -90,6 +96,8 @@ function dispatchFixtureCommand(input: {
   emit: (event: ApplicationEvent) => void;
   generation: number;
   sequence: number;
+  showInteractions: boolean;
+  pendingRequestIds: Set<string>;
 }): unknown {
   const { command, request, emit, generation, sequence } = input;
   switch (command) {
@@ -160,6 +168,25 @@ function dispatchFixtureCommand(input: {
         configOptions: session.controls.configOptions,
         truncated: false,
       });
+      if (input.showInteractions) {
+        emit({ type: "session_state_changed", sessionId: session.sessionId, state: "waiting_for_input" });
+        emit({
+          type: "permission_requested", sessionId: session.sessionId, interactionId: `permission-${sequence}`,
+          title: "Remove generated fixture output", consequence: "Deletes the generated output file.",
+          scope: { type: "command", command: "rm -- ./output.txt", workingDirectory: FIXTURE_WORKSPACE, affectedPaths: [`${FIXTURE_WORKSPACE}/output.txt`] },
+          availableDecisions: ["allow_once", "allow_always", "deny_once", "deny_always"],
+        });
+        emit({
+          type: "elicitation_requested", sessionId: session.sessionId, interactionId: `text-${sequence}`,
+          prompt: "Provide a label for this result",
+          control: { type: "text", fieldId: "label", label: "Result label", sensitive: true, placeholder: null, minLength: 1, maxLength: 64 },
+        });
+        emit({
+          type: "elicitation_requested", sessionId: session.sessionId, interactionId: `choice-${sequence}`,
+          prompt: "Choose an output format",
+          control: { type: "choice", fieldId: "format", label: "Format", options: ["Markdown", "Plain text"], multiple: false, truncated: false },
+        });
+      }
       return session;
     }
     case "prompt_send": {
@@ -236,11 +263,17 @@ function dispatchFixtureCommand(input: {
       return { stopReason: "end_turn" };
     }
     case "prompt_cancel":
+      emit({ type: "interactions_cleared", sessionId: FIXTURE_SESSION_ID });
       emit({
         type: "session_state_changed",
         sessionId: FIXTURE_SESSION_ID,
         state: "ready",
       });
+      return { acknowledged: true };
+    case "permission_respond":
+    case "elicitation_respond":
+      emit({ type: "interaction_resolved", interactionId: String(request.interactionId), kind: command === "permission_respond" ? "permission" : "elicitation" });
+      if (input.pendingRequestIds.size === 0) emit({ type: "session_state_changed", sessionId: FIXTURE_SESSION_ID, state: "ready" });
       return { acknowledged: true };
     case "session_set_mode":
       emit({

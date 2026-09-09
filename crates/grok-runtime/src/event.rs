@@ -202,6 +202,7 @@ pub enum PermissionKind {
     Command {
         command: String,
         working_directory: Option<PathBuf>,
+        affected_paths: Vec<PathBuf>,
     },
     Filesystem {
         operation: String,
@@ -222,6 +223,8 @@ pub enum ElicitationKind {
         label: Option<String>,
         placeholder: Option<String>,
         sensitive: bool,
+        min_length: usize,
+        max_length: usize,
     },
     Confirmation {
         field_id: String,
@@ -406,6 +409,7 @@ mod tests {
                 kind: PermissionKind::Command {
                     command: "cargo test".into(),
                     working_directory: Some(PathBuf::from("workspace")),
+                    affected_paths: vec![],
                 },
                 available_decisions: vec![
                     PermissionDecision::AllowOnce,
