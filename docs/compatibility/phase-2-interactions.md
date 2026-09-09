@@ -44,7 +44,7 @@ Native build, React render tests, browser keyboard interaction, screenshots, and
 
 ## Follow-up QA on macOS, 2026-09-09
 
-**Status: local automated and interaction-fixture QA passed; issue 13 is not yet qualified for closure.** This follow-up starts from merged PR #27, commit `4da15c21b91fcad5f54fd11ef17ed377c71a4c43`, with the local QA fixes described below. Windows QA has not run.
+**Status: local automated and interaction-fixture QA passed; issue 13 is not yet qualified for closure.** This follow-up starts from merged PR #27, commit `4da15c21b91fcad5f54fd11ef17ed377c71a4c43`, with the local QA fixes described below. The subsequent Windows CI results are tracked in [PR #28](https://github.com/zyfvhcfh87-rgb/GrokGUIPrototype/pull/28); the table below records the local run.
 
 Environment: Apple Silicon macOS, Node 26.8.1, TypeScript 7.0.2, Vite 8.2.2, installed Grok 1.0.25 (`f7e67d6988e2`, stable). No credential contents were read and no model prompts were submitted to the installed runtime.
 
@@ -71,7 +71,7 @@ Environment: Apple Silicon macOS, Node 26.8.1, TypeScript 7.0.2, Vite 8.2.2, ins
 | `npm run tauri build -- --debug --bundles app` | macOS development app bundle produced successfully |
 | Packaged app launch | Local assets loaded; installed Grok reached Ready, ACP v1, session list/new/load/resume/close advertised, authentication handled by Grok |
 | Packaged full interaction workflow | Blocked: selecting a workspace reports `native workspace selection is unavailable on this platform` |
-| Windows transport, tests and packaging | Not run locally; prepared `.github/workflows/windows-qa.yml`, not yet executed |
+| Windows transport, tests and packaging | Not run locally; `.github/workflows/windows-qa.yml` runs on PR #28, with final results linked there |
 
 The Rust build also emits non-fatal macOS warnings about unused Windows diagnostic helpers and the unavailable native picker branch. No warning-free build claim is made.
 
@@ -95,3 +95,10 @@ Confirmed by native UI actions and accessibility/screenshot inspection:
 1. Run the prepared Windows QA workflow on the QA commit. Require the frontend, Rust workspace (including Windows-only transport/process targets), formatting, and NSIS development packaging steps to pass.
 2. In the Windows packaged application, verify permission allow/deny, elicitation accept/cancel, turn cancellation, close, crash/restart, and stale-request expiry through the native command/event bridge. Record the tested commit, runtime version/capabilities, and sanitized results. Development fixture checks above do not replace this step.
 3. Publish the QA fixes and evidence, then close #13 only once the remaining desktop qualification is satisfied. The macOS picker limitation is outside this permission/elicitation change and must not be represented as a completed desktop workflow.
+
+
+### Windows CI follow-up
+
+The first Windows run compiled successfully and exposed four outdated assertions in `managed_restart_faults.rs`: they expected only `created\n`, while the workspace-aware fixture intentionally persists that marker plus its synthetic workspace. The assertions now check the exact canonical workspace record and continue to forbid session identifiers or prompt content. The close marker remains fixed and payload-free. The workflow uses `--no-fail-fast` so failures in one Rust target do not hide results from subsequent targets.
+
+[PR #28](https://github.com/zyfvhcfh87-rgb/GrokGUIPrototype/pull/28) records the final tested commit, CI test totals and installer artifact. Successful automated CI does not by itself complete the packaged Windows interaction closure gate above.
