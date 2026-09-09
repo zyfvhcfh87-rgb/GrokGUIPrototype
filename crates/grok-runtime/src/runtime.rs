@@ -102,12 +102,13 @@ struct InteractionGateState {
 
 impl InteractionGateState {
     fn allows(&self, session_id: Option<&str>) -> bool {
-        !self.runtime_stopping && session_id.is_none_or(|id| {
-            self.known_sessions.contains(id)
-                && !self.cancelled_sessions.contains(id)
-                && !self.closing_sessions.contains(id)
-                && !self.unavailable_sessions.contains(id)
-        })
+        !self.runtime_stopping
+            && session_id.is_none_or(|id| {
+                self.known_sessions.contains(id)
+                    && !self.cancelled_sessions.contains(id)
+                    && !self.closing_sessions.contains(id)
+                    && !self.unavailable_sessions.contains(id)
+            })
     }
 }
 
@@ -639,7 +640,10 @@ impl GrokRuntime {
         interaction_id: &str,
         decision: PermissionDecision,
     ) -> Result<(), RuntimeError> {
-        let gate = self.shared.interaction_gate.lock()
+        let gate = self
+            .shared
+            .interaction_gate
+            .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pending = self
             .shared
@@ -654,8 +658,11 @@ impl GrokRuntime {
             ));
         };
         if !gate.allows(Some(&advertised.session_id)) {
-            return Err(runtime_error(RuntimeErrorCode::UnknownInteraction,
-                "permission request is no longer active", false));
+            return Err(runtime_error(
+                RuntimeErrorCode::UnknownInteraction,
+                "permission request is no longer active",
+                false,
+            ));
         }
         let response = if decision == PermissionDecision::Cancel {
             RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
@@ -688,7 +695,10 @@ impl GrokRuntime {
         interaction_id: &str,
         decision: ElicitationDecision,
     ) -> Result<(), RuntimeError> {
-        let gate = self.shared.interaction_gate.lock()
+        let gate = self
+            .shared
+            .interaction_gate
+            .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pending = self
             .shared
@@ -703,8 +713,11 @@ impl GrokRuntime {
             ));
         };
         if !gate.allows(advertised.session_id.as_deref()) {
-            return Err(runtime_error(RuntimeErrorCode::UnknownInteraction,
-                "elicitation request is no longer active", false));
+            return Err(runtime_error(
+                RuntimeErrorCode::UnknownInteraction,
+                "elicitation request is no longer active",
+                false,
+            ));
         }
         validate_elicitation_decision(&advertised.kind, &decision)?;
         let response = normalize_elicitation_response(decision)?;
@@ -1675,7 +1688,9 @@ fn normalize_permission_request(
     if options.is_empty() {
         return None;
     }
-    if request.options.len() > 16 || options.values().collect::<BTreeSet<_>>().len() != options.len() {
+    if request.options.len() > 16
+        || options.values().collect::<BTreeSet<_>>().len() != options.len()
+    {
         return None;
     }
 
@@ -1702,18 +1717,24 @@ fn permission_kind(update: &ToolCallUpdate) -> Option<PermissionKind> {
     }
     if let Some(value) = raw.and_then(|raw| raw.get("affectedPaths")) {
         let paths = value.as_array()?;
-        if paths.len() > 64 { return None; }
+        if paths.len() > 64 {
+            return None;
+        }
         for path in paths {
             affected_paths.insert(validate_absolute_interaction_path(path.as_str()?)?);
         }
     }
     if let Some(locations) = &update.fields.locations {
-        if locations.len() > 64 { return None; }
+        if locations.len() > 64 {
+            return None;
+        }
         for location in locations {
             affected_paths.insert(validate_absolute_interaction_path(location.path.to_str()?)?);
         }
     }
-    if affected_paths.len() > 64 { return None; }
+    if affected_paths.len() > 64 {
+        return None;
+    }
     let command = raw
         .and_then(|raw| raw.get("command"))
         .and_then(Value::as_str)
@@ -1798,7 +1819,11 @@ fn normalize_elicitation_kind(mode: &ElicitationMode) -> Option<ElicitationKind>
     let shape = serde_json::to_value(&form.requested_schema).ok()?;
     if let Some(required) = shape.get("required").filter(|value| !value.is_null()) {
         let required = required.as_array()?;
-        if required.len() > 1 || required.iter().any(|value| value.as_str() != Some(field_id.as_str())) {
+        if required.len() > 1
+            || required
+                .iter()
+                .any(|value| value.as_str() != Some(field_id.as_str()))
+        {
             return None;
         }
     }
@@ -1816,8 +1841,11 @@ fn normalize_elicitation_kind(mode: &ElicitationMode) -> Option<ElicitationKind>
                 }
             };
             let min_length = length("minLength", 0)?;
-            let max_length = length("maxLength", MAX_ELICITATION_VALUE_BYTES)?.min(MAX_ELICITATION_VALUE_BYTES);
-            if min_length > max_length { return None; }
+            let max_length =
+                length("maxLength", MAX_ELICITATION_VALUE_BYTES)?.min(MAX_ELICITATION_VALUE_BYTES);
+            if min_length > max_length {
+                return None;
+            }
             let label = schema
                 .title
                 .as_deref()
@@ -1832,7 +1860,9 @@ fn normalize_elicitation_kind(mode: &ElicitationMode) -> Option<ElicitationKind>
                 if options.is_empty()
                     || options.len() > 64
                     || options.iter().collect::<BTreeSet<_>>().len() != options.len()
-                    || options.iter().any(|value| value.chars().count() < min_length || value.chars().count() > max_length)
+                    || options.iter().any(|value| {
+                        value.chars().count() < min_length || value.chars().count() > max_length
+                    })
                     || !options
                         .iter()
                         .all(|option| validate_exact_interaction_text(option, 512).is_some())
@@ -1910,7 +1940,12 @@ fn validate_elicitation_decision(
         return Err(invalid_elicitation_decision());
     }
     let valid = match kind {
-        ElicitationKind::Text { field_id, min_length, max_length, .. } => {
+        ElicitationKind::Text {
+            field_id,
+            min_length,
+            max_length,
+            ..
+        } => {
             matches!(content.get(field_id), Some(ElicitationValue::String(value))
                 if value.chars().count() >= *min_length && value.chars().count() <= *max_length)
         }
@@ -3119,7 +3154,11 @@ mod tests {
         });
         let request: RequestPermissionRequest = serde_json::from_value(wire.clone()).unwrap();
         let (event, _) = normalize_permission_request(&request, "gui-1".to_owned()).unwrap();
-        let RuntimeEvent::PermissionRequested { kind: PermissionKind::Command { affected_paths, .. }, .. } = event else {
+        let RuntimeEvent::PermissionRequested {
+            kind: PermissionKind::Command { affected_paths, .. },
+            ..
+        } = event
+        else {
             panic!("expected exact command scope");
         };
         assert_eq!(affected_paths, vec![first, second]);
@@ -3142,31 +3181,69 @@ mod tests {
             }, "required": ["label"] }
         })).unwrap();
         let kind = normalize_elicitation_kind(&request.mode).unwrap();
-        assert!(matches!(&kind, ElicitationKind::Text { min_length: 1, max_length: 2, sensitive: true, placeholder: None, .. }));
+        assert!(matches!(
+            &kind,
+            ElicitationKind::Text {
+                min_length: 1,
+                max_length: 2,
+                sensitive: true,
+                placeholder: None,
+                ..
+            }
+        ));
         for (text, valid) in [("", false), ("a", true), ("😺", true), ("abc", false)] {
-            let decision = ElicitationDecision::Accept { content: BTreeMap::from([
-                ("label".to_owned(), ElicitationValue::String(text.to_owned()))
-            ]) };
-            assert_eq!(validate_elicitation_decision(&kind, &decision).is_ok(), valid);
+            let decision = ElicitationDecision::Accept {
+                content: BTreeMap::from([(
+                    "label".to_owned(),
+                    ElicitationValue::String(text.to_owned()),
+                )]),
+            };
+            assert_eq!(
+                validate_elicitation_decision(&kind, &decision).is_ok(),
+                valid
+            );
         }
-        assert!(!serde_json::to_string(&kind).unwrap().contains("private-default"));
+        assert!(
+            !serde_json::to_string(&kind)
+                .unwrap()
+                .contains("private-default")
+        );
     }
 
     #[tokio::test]
     async fn a_close_started_before_a_response_prevents_approval_delivery() {
         let runtime = GrokRuntime::from_target(RuntimeTarget {
-            executable: PathBuf::from("unused-fixture"), arguments: vec![], environment: vec![],
-            auth_method: None, request_timeout: DEFAULT_REQUEST_TIMEOUT,
+            executable: PathBuf::from("unused-fixture"),
+            arguments: vec![],
+            environment: vec![],
+            auth_method: None,
+            request_timeout: DEFAULT_REQUEST_TIMEOUT,
         });
         runtime.shared.activate_session("session");
         let event = RuntimeEvent::PermissionRequested {
-            session_id: "session".to_owned(), interaction_id: "gui-1".to_owned(), title: "Fixture".to_owned(),
-            consequence: None, kind: PermissionKind::Other, available_decisions: vec![PermissionDecision::AllowOnce],
+            session_id: "session".to_owned(),
+            interaction_id: "gui-1".to_owned(),
+            title: "Fixture".to_owned(),
+            consequence: None,
+            kind: PermissionKind::Other,
+            available_decisions: vec![PermissionDecision::AllowOnce],
         };
-        let mut receiver = runtime.shared.register_permission("session".to_owned(), "gui-1".to_owned(),
-            BTreeMap::from([(PermissionDecision::AllowOnce, "yes".to_owned())]), event).unwrap();
+        let mut receiver = runtime
+            .shared
+            .register_permission(
+                "session".to_owned(),
+                "gui-1".to_owned(),
+                BTreeMap::from([(PermissionDecision::AllowOnce, "yes".to_owned())]),
+                event,
+            )
+            .unwrap();
         runtime.shared.begin_session_close("session").unwrap();
-        assert!(runtime.respond_permission("gui-1", PermissionDecision::AllowOnce).await.is_err());
+        assert!(
+            runtime
+                .respond_permission("gui-1", PermissionDecision::AllowOnce)
+                .await
+                .is_err()
+        );
         assert!(receiver.try_recv().is_err());
     }
 
@@ -3283,14 +3360,10 @@ mod tests {
 
     #[test]
     fn workspace_identity_does_not_treat_distinct_directories_as_the_same_session_home() {
-        let first = std::env::temp_dir().join(format!(
-            "grok-runtime-workspace-a-{}",
-            std::process::id()
-        ));
-        let second = std::env::temp_dir().join(format!(
-            "grok-runtime-workspace-b-{}",
-            std::process::id()
-        ));
+        let first =
+            std::env::temp_dir().join(format!("grok-runtime-workspace-a-{}", std::process::id()));
+        let second =
+            std::env::temp_dir().join(format!("grok-runtime-workspace-b-{}", std::process::id()));
         std::fs::create_dir_all(&first).expect("first workspace");
         std::fs::create_dir_all(&second).expect("second workspace");
 

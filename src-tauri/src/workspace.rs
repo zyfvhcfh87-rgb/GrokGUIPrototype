@@ -125,11 +125,10 @@ impl WorkspaceStore {
     }
 
     fn prune_last_sessions(&mut self) {
-        self.last_sessions
-            .retain(|(path, session_id)| {
-                is_safe_session_id(session_id)
-                    && self.paths.iter().any(|existing| same_path(existing, path))
-            });
+        self.last_sessions.retain(|(path, session_id)| {
+            is_safe_session_id(session_id)
+                && self.paths.iter().any(|existing| same_path(existing, path))
+        });
     }
 
     fn persist(&self) -> Result<(), WorkspaceError> {
@@ -170,9 +169,7 @@ fn same_path(left: &Path, right: &Path) -> bool {
 }
 
 fn is_safe_session_id(value: &str) -> bool {
-    !value.is_empty()
-        && value.len() <= MAX_SESSION_ID_BYTES
-        && !value.chars().any(char::is_control)
+    !value.is_empty() && value.len() <= MAX_SESSION_ID_BYTES && !value.chars().any(char::is_control)
 }
 
 fn last_session_for(last_sessions: &[(PathBuf, String)], path: &Path) -> Option<String> {

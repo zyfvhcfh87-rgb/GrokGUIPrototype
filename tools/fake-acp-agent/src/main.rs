@@ -446,8 +446,7 @@ fn run_lifecycle(
                     continue;
                 }
                 let sessions = if state.session_created
-                    && request_cwd(&frame)
-                        .is_none_or(|cwd| cwd_matches(&cwd, session_cwd(&state)))
+                    && request_cwd(&frame).is_none_or(|cwd| cwd_matches(&cwd, session_cwd(&state)))
                 {
                     json!([{
                         "sessionId": SESSION_ID,
@@ -477,7 +476,11 @@ fn run_lifecycle(
                 if !requested_cwd_matches_session(&frame, &state) {
                     write_frame(
                         &mut output,
-                        error_response(id, -32602, "Session does not belong to the requested workspace"),
+                        error_response(
+                            id,
+                            -32602,
+                            "Session does not belong to the requested workspace",
+                        ),
                     )?;
                     continue;
                 }
@@ -495,7 +498,11 @@ fn run_lifecycle(
                 if !requested_cwd_matches_session(&frame, &state) {
                     write_frame(
                         &mut output,
-                        error_response(id, -32602, "Session does not belong to the requested workspace"),
+                        error_response(
+                            id,
+                            -32602,
+                            "Session does not belong to the requested workspace",
+                        ),
                     )?;
                     continue;
                 }
@@ -800,6 +807,12 @@ fn agent_message(text: &str, message_id: &str) -> Value {
 }
 
 fn permission_request() -> Value {
+    let cwd = if cfg!(windows) {
+        FIXTURE_CWD
+    } else {
+        "/fixture-workspace"
+    };
+    let affected_path = std::path::Path::new(cwd).join("fixture.txt");
     json!({
         "jsonrpc": "2.0",
         "id": "permission-001",
@@ -812,13 +825,13 @@ fn permission_request() -> Value {
                 "kind": "execute",
                 "status": "pending",
                 "locations": [{
-                    "path": "C:\\fixture-workspace\\fixture.txt",
+                    "path": affected_path,
                     "line": 1
                 }],
                 "rawInput": {
                     "command": "fixture-tool --check fixture.txt",
-                    "cwd": FIXTURE_CWD,
-                    "affectedPath": "C:\\fixture-workspace\\fixture.txt"
+                    "cwd": cwd,
+                    "affectedPath": affected_path
                 }
             },
             "options": [
