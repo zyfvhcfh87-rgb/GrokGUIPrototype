@@ -7,7 +7,6 @@ use tokio::time::timeout;
 
 const PROBE_DEADLINE: Duration = Duration::from_secs(8);
 const OUTER_TEST_TIMEOUT: Duration = Duration::from_secs(30);
-const SESSION_STATE_MARKER: &[u8] = b"created\n";
 const SESSION_CLOSE_MARKER: &[u8] = b"closed\n";
 
 #[tokio::test]
@@ -64,10 +63,13 @@ async fn assert_recovery_fault(fault: &str, expected_error: &'static str) {
         other => panic!("expected a managed restart error, got {other}"),
     }
 
+    let workspace = fs::canonicalize(temporary_directory.path())
+        .expect("the synthetic workspace should canonicalize");
+    let expected_state = format!("created\n{}\n", workspace.display());
     assert_eq!(
-        fs::read(&state_file).expect("the first process should persist its fixed state marker"),
-        SESSION_STATE_MARKER,
-        "the fixture must not persist a session identifier or request payload"
+        fs::read(&state_file).expect("the first process should persist its synthetic workspace"),
+        expected_state.as_bytes(),
+        "the fixture must persist only its marker and synthetic workspace, without session IDs or prompt content"
     );
     assert_eq!(
         fs::read(&close_marker).expect("the cleanup close request should write its marker"),
