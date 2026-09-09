@@ -69,13 +69,13 @@
   "variantFields": {
     "permissionScope": {
       "tool": ["toolName"],
-      "command": ["command", "workingDirectory"],
+      "command": ["affectedPaths", "command", "workingDirectory"],
       "filesystem": ["operation", "path"],
       "network": ["destination"],
       "other": []
     },
     "elicitationControl": {
-      "text": ["fieldId", "label", "placeholder", "sensitive"],
+      "text": ["fieldId", "label", "maxLength", "minLength", "placeholder", "sensitive"],
       "confirmation": ["fieldId", "label"],
       "choice": ["fieldId", "label", "multiple", "options", "truncated"],
       "other": []

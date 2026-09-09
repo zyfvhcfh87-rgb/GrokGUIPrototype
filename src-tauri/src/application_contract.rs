@@ -1422,6 +1422,7 @@ pub enum PermissionScopeDto {
     Command {
         command: String,
         working_directory: Option<String>,
+        affected_paths: Vec<String>,
     },
     Filesystem {
         operation: String,
@@ -1445,6 +1446,8 @@ pub enum ElicitationControlDto {
         label: Option<String>,
         placeholder: Option<String>,
         sensitive: bool,
+        min_length: usize,
+        max_length: usize,
     },
     Confirmation {
         field_id: String,
@@ -1833,6 +1836,7 @@ impl PermissionScopeDto {
             grok_runtime::PermissionKind::Command {
                 command,
                 working_directory,
+                affected_paths,
             } => {
                 validate_output_text(&command, MAX_DISPLAY_TEXT_BYTES)?;
                 let working_directory = match working_directory {
@@ -1846,6 +1850,14 @@ impl PermissionScopeDto {
                 Some(Self::Command {
                     command,
                     working_directory,
+                    affected_paths: {
+                        if affected_paths.len() > 64 { return None; }
+                        affected_paths.into_iter().map(|path| {
+                            let value = path.to_str()?.to_owned();
+                            validate_output_text(&value, MAX_WORKSPACE_PATH_BYTES)?;
+                            Some(value)
+                        }).collect::<Option<Vec<_>>>()?
+                    },
                 })
             }
             grok_runtime::PermissionKind::Filesystem { operation, path } => {
@@ -1871,11 +1883,15 @@ impl From<grok_runtime::ElicitationKind> for ElicitationControlDto {
                 label,
                 placeholder,
                 sensitive,
+                min_length,
+                max_length,
             } => Self::Text {
                 field_id,
                 label: label.map(|value| bounded_text(value, MAX_DISPLAY_TEXT_BYTES).0),
                 placeholder: placeholder.map(|value| bounded_text(value, MAX_DISPLAY_TEXT_BYTES).0),
                 sensitive,
+                min_length,
+                max_length,
             },
             grok_runtime::ElicitationKind::Confirmation { field_id, label } => Self::Confirmation {
                 field_id,
@@ -2187,6 +2203,7 @@ mod tests {
                 scope: PermissionScopeDto::Command {
                     command: "cargo test".to_owned(),
                     working_directory: Some("C:\\workspace".to_owned()),
+                    affected_paths: vec![],
                 },
                 available_decisions: vec![
                     PermissionDecisionDto::AllowOnce,
@@ -2857,7 +2874,8 @@ mod tests {
                 },
                 PermissionScopeDto::Command {
                     command: "run".to_owned(),
-                    working_directory: None
+                    working_directory: None,
+                    affected_paths: vec![],
                 },
                 PermissionScopeDto::Filesystem {
                     operation: "read".to_owned(),
@@ -2877,7 +2895,9 @@ mod tests {
                     field_id: "text".to_owned(),
                     label: None,
                     placeholder: None,
-                    sensitive: false
+                    sensitive: false,
+                    min_length: 0,
+                    max_length: 16384,
                 },
                 ElicitationControlDto::Confirmation {
                     field_id: "confirm".to_owned(),
@@ -3023,6 +3043,7 @@ mod tests {
                 kind: grok_runtime::PermissionKind::Command {
                     command: "cargo test".to_owned(),
                     working_directory: Some(std::path::PathBuf::from("C:\\workspace")),
+                    affected_paths: vec![],
                 },
                 available_decisions: vec![
                     grok_runtime::PermissionDecision::AllowOnce,
@@ -3054,6 +3075,7 @@ mod tests {
                 kind: grok_runtime::PermissionKind::Command {
                     command: secret.clone(),
                     working_directory: None,
+                    affected_paths: vec![],
                 },
                 available_decisions: vec![grok_runtime::PermissionDecision::AllowOnce],
             });

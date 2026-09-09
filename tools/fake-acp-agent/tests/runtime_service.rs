@@ -480,6 +480,7 @@ async fn prompt_streams_domain_events_and_accepts_scoped_user_decisions() {
                     PermissionKind::Command {
                         command: "fixture-tool --check fixture.txt".to_owned(),
                         working_directory: Some(r"C:\fixture-workspace".into()),
+                        affected_paths: vec![r"C:\fixture-workspace\fixture.txt".into()],
                     }
                 );
                 runtime

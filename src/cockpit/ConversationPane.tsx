@@ -1,4 +1,4 @@
-import type { FormEvent, KeyboardEvent } from "react";
+import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 
 import type {
   ConversationCard,
@@ -14,6 +14,7 @@ export function ConversationPane({
   onCancel,
   onRecover,
   onOpenUrl,
+  interactions,
 }: {
   presentation: ConversationPresentation;
   draft: string;
@@ -22,6 +23,7 @@ export function ConversationPane({
   onCancel: () => void;
   onRecover: () => void;
   onOpenUrl: (href: string) => void;
+  interactions?: ReactNode;
 }) {
   const { composer } = presentation;
 
@@ -53,6 +55,8 @@ export function ConversationPane({
           </button>
         ) : null}
       </header>
+
+      {interactions}
 
       <div className="conversation__transcript" aria-live="polite">
         {presentation.kind === "empty" || presentation.kind === "no_session" ? (

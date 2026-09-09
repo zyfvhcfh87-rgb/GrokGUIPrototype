@@ -89,6 +89,7 @@ export type ApplicationState = {
   sessions: Record<string, SessionViewState>;
   observedExtensions: { unknown: number; invalid: number };
   pendingEvents: Record<number, ApplicationEventEnvelope>;
+  seenInteractionIds: string[];
 };
 
 export function initialApplicationState(generation = 0): ApplicationState {
@@ -106,6 +107,7 @@ export function initialApplicationState(generation = 0): ApplicationState {
     sessions: {},
     observedExtensions: { unknown: 0, invalid: 0 },
     pendingEvents: {},
+    seenInteractionIds: [],
   };
 }
 
@@ -207,9 +209,17 @@ function isValidPosition(envelope: ApplicationEventEnvelope): boolean {
 }
 
 function applyEvent(state: ApplicationState, event: ApplicationEvent): ApplicationState {
+  if (event.type === "permission_requested" || event.type === "elicitation_requested") {
+    if (state.seenInteractionIds.includes(event.interactionId)) return state;
+    if (state.seenInteractionIds.length >= 4096) {
+      return { ...clearInteractions(state, null), needsResync: true };
+    }
+    state = { ...state, seenInteractionIds: [...state.seenInteractionIds, event.interactionId] };
+    if (event.sessionId !== null && state.sessions[event.sessionId] === undefined) return state;
+  }
   if (event.type === "runtime_state_changed") {
     const safeState =
-      event.state === "disconnected" || event.state === "failed"
+      event.state === "disconnected" || event.state === "failed" || event.state === "connecting" || event.state === "authenticating"
         ? clearInteractions(state, null)
         : state;
     return {

@@ -65,6 +65,7 @@ export type PermissionScope =
       type: "command";
       command: string;
       workingDirectory: string | null;
+      affectedPaths: string[];
     }
   | { type: "filesystem"; operation: string; path: string }
   | { type: "network"; destination: string }
@@ -77,6 +78,8 @@ export type ElicitationControl =
       label: string | null;
       placeholder: string | null;
       sensitive: boolean;
+      minLength: number;
+      maxLength: number;
     }
   | { type: "confirmation"; fieldId: string; label: string | null }
   | {
@@ -657,6 +660,7 @@ export const APPLICATION_VARIANT_FIELDS = {
   permissionScope: {
     tool: taggedFieldsOf<Extract<PermissionScope, { type: "tool" }>, "type">()(["toolName"]),
     command: taggedFieldsOf<Extract<PermissionScope, { type: "command" }>, "type">()([
+      "affectedPaths",
       "command",
       "workingDirectory",
     ]),
@@ -673,6 +677,8 @@ export const APPLICATION_VARIANT_FIELDS = {
     text: taggedFieldsOf<Extract<ElicitationControl, { type: "text" }>, "type">()([
       "fieldId",
       "label",
+      "maxLength",
+      "minLength",
       "placeholder",
       "sensitive",
     ]),

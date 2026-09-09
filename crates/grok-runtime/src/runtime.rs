@@ -94,9 +94,21 @@ struct RuntimeShared {
 #[derive(Default)]
 struct InteractionGateState {
     runtime_stopping: bool,
+    known_sessions: BTreeSet<String>,
     cancelled_sessions: BTreeSet<String>,
     closing_sessions: BTreeSet<String>,
     unavailable_sessions: BTreeSet<String>,
+}
+
+impl InteractionGateState {
+    fn allows(&self, session_id: Option<&str>) -> bool {
+        !self.runtime_stopping && session_id.is_none_or(|id| {
+            self.known_sessions.contains(id)
+                && !self.cancelled_sessions.contains(id)
+                && !self.closing_sessions.contains(id)
+                && !self.unavailable_sessions.contains(id)
+        })
+    }
 }
 
 struct PendingPermission {
@@ -627,6 +639,8 @@ impl GrokRuntime {
         interaction_id: &str,
         decision: PermissionDecision,
     ) -> Result<(), RuntimeError> {
+        let gate = self.shared.interaction_gate.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pending = self
             .shared
             .pending_permissions
@@ -639,6 +653,10 @@ impl GrokRuntime {
                 false,
             ));
         };
+        if !gate.allows(Some(&advertised.session_id)) {
+            return Err(runtime_error(RuntimeErrorCode::UnknownInteraction,
+                "permission request is no longer active", false));
+        }
         let response = if decision == PermissionDecision::Cancel {
             RequestPermissionResponse::new(RequestPermissionOutcome::Cancelled)
         } else {
@@ -670,6 +688,8 @@ impl GrokRuntime {
         interaction_id: &str,
         decision: ElicitationDecision,
     ) -> Result<(), RuntimeError> {
+        let gate = self.shared.interaction_gate.lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
         let mut pending = self
             .shared
             .pending_elicitations
@@ -682,6 +702,10 @@ impl GrokRuntime {
                 false,
             ));
         };
+        if !gate.allows(advertised.session_id.as_deref()) {
+            return Err(runtime_error(RuntimeErrorCode::UnknownInteraction,
+                "elicitation request is no longer active", false));
+        }
         validate_elicitation_decision(&advertised.kind, &decision)?;
         let response = normalize_elicitation_response(decision)?;
         let pending = pending
@@ -743,6 +767,7 @@ impl RuntimeShared {
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
         gate.runtime_stopping = false;
+        gate.known_sessions.clear();
         gate.cancelled_sessions.clear();
         gate.closing_sessions.clear();
         gate.unavailable_sessions.clear();
@@ -886,11 +911,7 @@ impl RuntimeShared {
             .interaction_gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if gate.runtime_stopping
-            || gate.cancelled_sessions.contains(&session_id)
-            || gate.closing_sessions.contains(&session_id)
-            || gate.unavailable_sessions.contains(&session_id)
-        {
+        if !gate.allows(Some(&session_id)) {
             return None;
         }
         let (response_tx, response_rx) = oneshot::channel();
@@ -922,13 +943,7 @@ impl RuntimeShared {
             .interaction_gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
-        if gate.runtime_stopping
-            || session_id.as_ref().is_some_and(|session_id| {
-                gate.cancelled_sessions.contains(session_id)
-                    || gate.closing_sessions.contains(session_id)
-                    || gate.unavailable_sessions.contains(session_id)
-            })
-        {
+        if !gate.allows(session_id.as_deref()) {
             return None;
         }
         let (response_tx, response_rx) = oneshot::channel();
@@ -1369,6 +1384,7 @@ impl RuntimeShared {
             .interaction_gate
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.known_sessions.insert(session_id.to_owned());
         gate.cancelled_sessions.remove(session_id);
         gate.closing_sessions.remove(session_id);
         gate.unavailable_sessions.remove(session_id);
@@ -1648,7 +1664,7 @@ fn normalize_permission_request(
             PermissionOptionKind::AllowAlways => PermissionDecision::AllowAlways,
             PermissionOptionKind::RejectOnce => PermissionDecision::DenyOnce,
             PermissionOptionKind::RejectAlways => PermissionDecision::DenyAlways,
-            _ => continue,
+            _ => return None,
         };
         let option_id = validate_exact_interaction_text(option.option_id.0.as_ref(), 256)?;
         if options.insert(decision, option_id).is_some() {
@@ -1657,6 +1673,9 @@ fn normalize_permission_request(
         available_decisions.push(decision);
     }
     if options.is_empty() {
+        return None;
+    }
+    if request.options.len() > 16 || options.values().collect::<BTreeSet<_>>().len() != options.len() {
         return None;
     }
 
@@ -1675,6 +1694,26 @@ fn normalize_permission_request(
 
 fn permission_kind(update: &ToolCallUpdate) -> Option<PermissionKind> {
     let raw = update.fields.raw_input.as_ref().and_then(Value::as_object);
+    let mut affected_paths = BTreeSet::new();
+    for key in ["affectedPath", "path"] {
+        if let Some(value) = raw.and_then(|raw| raw.get(key)) {
+            affected_paths.insert(validate_absolute_interaction_path(value.as_str()?)?);
+        }
+    }
+    if let Some(value) = raw.and_then(|raw| raw.get("affectedPaths")) {
+        let paths = value.as_array()?;
+        if paths.len() > 64 { return None; }
+        for path in paths {
+            affected_paths.insert(validate_absolute_interaction_path(path.as_str()?)?);
+        }
+    }
+    if let Some(locations) = &update.fields.locations {
+        if locations.len() > 64 { return None; }
+        for location in locations {
+            affected_paths.insert(validate_absolute_interaction_path(location.path.to_str()?)?);
+        }
+    }
+    if affected_paths.len() > 64 { return None; }
     let command = raw
         .and_then(|raw| raw.get("command"))
         .and_then(Value::as_str)
@@ -1690,28 +1729,17 @@ fn permission_kind(update: &ToolCallUpdate) -> Option<PermissionKind> {
         return Some(PermissionKind::Command {
             command,
             working_directory: Some(working_directory),
+            affected_paths: affected_paths.into_iter().collect(),
         });
     }
-
-    let path = raw
-        .and_then(|raw| raw.get("affectedPath").or_else(|| raw.get("path")))
-        .and_then(Value::as_str)
-        .and_then(validate_absolute_interaction_path)
-        .or_else(|| {
-            update
-                .fields
-                .locations
-                .as_ref()
-                .and_then(|locations| locations.first())
-                .map(|location| location.path.clone())
-                .filter(|path| path.is_absolute())
-        });
-    if let Some(path) = path {
+    // A single-path form cannot describe a multi-path edit or move exactly.
+    if affected_paths.len() == 1 {
+        let path = affected_paths.into_iter().next()?;
         let operation = match update.fields.kind {
             Some(ToolKind::Read) => "read",
             Some(ToolKind::Edit) => "edit",
             Some(ToolKind::Delete) => "delete",
-            Some(ToolKind::Move) => "move",
+            Some(ToolKind::Move) => return None,
             _ => return None,
         };
         return Some(PermissionKind::Filesystem {
@@ -1743,7 +1771,7 @@ fn validate_absolute_interaction_path(value: &str) -> Option<PathBuf> {
 }
 
 fn validate_exact_interaction_text(value: &str, maximum: usize) -> Option<String> {
-    (!value.is_empty() && value.len() <= maximum && !value.chars().any(char::is_control))
+    (!value.trim().is_empty() && value.len() <= maximum && !value.chars().any(char::is_control))
         .then(|| value.to_owned())
 }
 
@@ -1767,8 +1795,29 @@ fn normalize_elicitation_kind(mode: &ElicitationMode) -> Option<ElicitationKind>
     }
     let (field_id, schema) = form.requested_schema.properties.first_key_value()?;
     let field_id = validate_exact_interaction_text(field_id, 256)?;
+    let shape = serde_json::to_value(&form.requested_schema).ok()?;
+    if let Some(required) = shape.get("required").filter(|value| !value.is_null()) {
+        let required = required.as_array()?;
+        if required.len() > 1 || required.iter().any(|value| value.as_str() != Some(field_id.as_str())) {
+            return None;
+        }
+    }
     Some(match schema {
         ElicitationPropertySchema::String(schema) => {
+            // Preserve supported validation rather than silently dropping constraints.
+            let shape = serde_json::to_value(schema).ok()?;
+            if shape.get("format").is_some_and(|value| !value.is_null()) {
+                return None;
+            }
+            let length = |key: &str, default: usize| -> Option<usize> {
+                match shape.get(key) {
+                    None | Some(Value::Null) => Some(default),
+                    Some(value) => usize::try_from(value.as_u64()?).ok(),
+                }
+            };
+            let min_length = length("minLength", 0)?;
+            let max_length = length("maxLength", MAX_ELICITATION_VALUE_BYTES)?.min(MAX_ELICITATION_VALUE_BYTES);
+            if min_length > max_length { return None; }
             let label = schema
                 .title
                 .as_deref()
@@ -1782,6 +1831,8 @@ fn normalize_elicitation_kind(mode: &ElicitationMode) -> Option<ElicitationKind>
             if let Some(options) = options {
                 if options.is_empty()
                     || options.len() > 64
+                    || options.iter().collect::<BTreeSet<_>>().len() != options.len()
+                    || options.iter().any(|value| value.chars().count() < min_length || value.chars().count() > max_length)
                     || !options
                         .iter()
                         .all(|option| validate_exact_interaction_text(option, 512).is_some())
@@ -1798,11 +1849,11 @@ fn normalize_elicitation_kind(mode: &ElicitationMode) -> Option<ElicitationKind>
                 ElicitationKind::Text {
                     field_id,
                     label,
-                    placeholder: schema
-                        .default
-                        .as_deref()
-                        .and_then(|value| validate_exact_interaction_text(value, 512)),
-                    sensitive: false,
+                    // Free text may contain secrets; do not expose schema defaults.
+                    placeholder: None,
+                    sensitive: true,
+                    min_length,
+                    max_length,
                 }
             }
         }
@@ -1859,8 +1910,9 @@ fn validate_elicitation_decision(
         return Err(invalid_elicitation_decision());
     }
     let valid = match kind {
-        ElicitationKind::Text { field_id, .. } => {
-            matches!(content.get(field_id), Some(ElicitationValue::String(_)))
+        ElicitationKind::Text { field_id, min_length, max_length, .. } => {
+            matches!(content.get(field_id), Some(ElicitationValue::String(value))
+                if value.chars().count() >= *min_length && value.chars().count() <= *max_length)
         }
         ElicitationKind::Confirmation { field_id, .. } => {
             matches!(content.get(field_id), Some(ElicitationValue::Boolean(_)))
@@ -3031,6 +3083,92 @@ mod tests {
     use super::*;
     use agent_client_protocol::schema::v1::{AuthMethod, AuthMethodAgent};
     use serde_json::json;
+
+    #[test]
+    fn interaction_gate_rejects_orphans_and_session_lifecycle_transitions() {
+        let mut gate = InteractionGateState::default();
+        assert!(!gate.allows(Some("unknown")));
+        assert!(gate.allows(None));
+        gate.known_sessions.insert("session".to_owned());
+        assert!(gate.allows(Some("session")));
+        gate.closing_sessions.insert("session".to_owned());
+        assert!(!gate.allows(Some("session")));
+        gate.closing_sessions.clear();
+        gate.cancelled_sessions.insert("session".to_owned());
+        assert!(!gate.allows(Some("session")));
+        gate.cancelled_sessions.clear();
+        gate.unavailable_sessions.insert("session".to_owned());
+        assert!(!gate.allows(Some("session")));
+        gate.runtime_stopping = true;
+        assert!(!gate.allows(None));
+    }
+
+    #[test]
+    fn command_permissions_preserve_all_paths_and_reject_ambiguous_options() {
+        let cwd = std::env::temp_dir();
+        let first = cwd.join("fixture-a.txt");
+        let second = cwd.join("fixture-b.txt");
+        let wire = json!({
+            "sessionId": "session", "toolCall": {
+                "toolCallId": "tool", "kind": "execute", "title": "Remove fixture output",
+                "rawInput": { "command": "fixture-tool --remove", "cwd": cwd, "affectedPath": first },
+                "locations": [{ "path": first }, { "path": second }]
+            },
+            "options": [{ "optionId": "yes", "name": "Allow once", "kind": "allow_once" },
+                { "optionId": "no", "name": "Deny once", "kind": "reject_once" }]
+        });
+        let request: RequestPermissionRequest = serde_json::from_value(wire.clone()).unwrap();
+        let (event, _) = normalize_permission_request(&request, "gui-1".to_owned()).unwrap();
+        let RuntimeEvent::PermissionRequested { kind: PermissionKind::Command { affected_paths, .. }, .. } = event else {
+            panic!("expected exact command scope");
+        };
+        assert_eq!(affected_paths, vec![first, second]);
+        let mut duplicate = wire.clone();
+        duplicate["options"][1]["optionId"] = json!("yes");
+        let duplicate = serde_json::from_value(duplicate).unwrap();
+        assert!(normalize_permission_request(&duplicate, "gui-2".to_owned()).is_none());
+        let mut filesystem = wire;
+        filesystem["toolCall"]["kind"] = json!("edit");
+        let filesystem = serde_json::from_value(filesystem).unwrap();
+        assert!(normalize_permission_request(&filesystem, "gui-3".to_owned()).is_none());
+    }
+
+    #[test]
+    fn elicitation_text_preserves_advertised_bounds_and_hides_defaults() {
+        let request: CreateElicitationRequest = serde_json::from_value(json!({
+            "mode": "form", "sessionId": "session", "message": "Label?",
+            "requestedSchema": { "type": "object", "properties": {
+                "label": { "type": "string", "minLength": 1, "maxLength": 2, "default": "private-default" }
+            }, "required": ["label"] }
+        })).unwrap();
+        let kind = normalize_elicitation_kind(&request.mode).unwrap();
+        assert!(matches!(&kind, ElicitationKind::Text { min_length: 1, max_length: 2, sensitive: true, placeholder: None, .. }));
+        for (text, valid) in [("", false), ("a", true), ("😺", true), ("abc", false)] {
+            let decision = ElicitationDecision::Accept { content: BTreeMap::from([
+                ("label".to_owned(), ElicitationValue::String(text.to_owned()))
+            ]) };
+            assert_eq!(validate_elicitation_decision(&kind, &decision).is_ok(), valid);
+        }
+        assert!(!serde_json::to_string(&kind).unwrap().contains("private-default"));
+    }
+
+    #[tokio::test]
+    async fn a_close_started_before_a_response_prevents_approval_delivery() {
+        let runtime = GrokRuntime::from_target(RuntimeTarget {
+            executable: PathBuf::from("unused-fixture"), arguments: vec![], environment: vec![],
+            auth_method: None, request_timeout: DEFAULT_REQUEST_TIMEOUT,
+        });
+        runtime.shared.activate_session("session");
+        let event = RuntimeEvent::PermissionRequested {
+            session_id: "session".to_owned(), interaction_id: "gui-1".to_owned(), title: "Fixture".to_owned(),
+            consequence: None, kind: PermissionKind::Other, available_decisions: vec![PermissionDecision::AllowOnce],
+        };
+        let mut receiver = runtime.shared.register_permission("session".to_owned(), "gui-1".to_owned(),
+            BTreeMap::from([(PermissionDecision::AllowOnce, "yes".to_owned())]), event).unwrap();
+        runtime.shared.begin_session_close("session").unwrap();
+        assert!(runtime.respond_permission("gui-1", PermissionDecision::AllowOnce).await.is_err());
+        assert!(receiver.try_recv().is_err());
+    }
 
     #[test]
     fn authentication_uses_only_bounded_advertised_methods() {
