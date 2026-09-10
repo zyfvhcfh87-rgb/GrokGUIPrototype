@@ -14,6 +14,7 @@ import type {
   ToolCallKind,
   Usage,
 } from "./contract.ts";
+import { advertisedPlanReview } from "./plan-review.ts";
 import { isRuntimeUsable } from "./sessions.ts";
 import type {
   ApplicationState,
@@ -39,6 +40,8 @@ export type ComposerKind =
   | "working"
   | "waiting"
   | "cancelling"
+  | "cancelled"
+  | "completed"
   | "closed"
   | "failed";
 
@@ -114,6 +117,9 @@ export type ComposerPresentation = {
 export type ActivityPresentation = {
   usage: Usage | null;
   plan: PlanEntry[];
+  planHeadline: "empty" | "saved" | "replaced";
+  canApprovePlan: boolean;
+  canRevisePlan: boolean;
   tools: ToolCallState[];
 };
 
@@ -168,7 +174,7 @@ export function projectConversation(input: {
     failure: input.failure,
     runtimeFailure: input.runtimeFailure,
   });
-  const activity = describeActivity(input.sessionView);
+  const activity = describeActivity(input.sessionView, composer);
   const canRecover = canRecoverConversation(input);
 
   if (input.sessionId === null) {
@@ -319,6 +325,19 @@ export function describeComposer(input: {
   }
   if (input.cancelling || input.sessionState === "cancelling") {
     return composer("cancelling", "Cancelling", "The current turn is stopping.", false, false, false);
+  }
+  if (input.sessionState === "cancelled") {
+    return composer(
+      "cancelled",
+      "Cancelled",
+      "The last turn was cancelled.",
+      true,
+      false,
+      true,
+    );
+  }
+  if (input.sessionState === "completed") {
+    return composer("completed", "Completed", "The last turn completed.", true, false, true);
   }
   if (input.sending || input.sessionState === "working") {
     return composer(
@@ -484,10 +503,20 @@ export function projectConversationCards(input: {
   return cards;
 }
 
-export function describeActivity(sessionView: SessionViewState | null): ActivityPresentation {
+export function describeActivity(
+  sessionView: SessionViewState | null,
+  composer?: ComposerPresentation,
+): ActivityPresentation {
+  const review = advertisedPlanReview(sessionView?.availableCommands ?? []);
+  const canReview = composer?.canSend ?? false;
+  const plan = sessionView?.plan ?? [];
+  const revision = sessionView?.planRevision ?? 0;
   return {
     usage: sessionView?.usage ?? null,
-    plan: sessionView?.plan ?? [],
+    plan,
+    planHeadline: plan.length === 0 ? "empty" : revision > 1 ? "replaced" : "saved",
+    canApprovePlan: canReview && review.approve !== null && plan.length > 0,
+    canRevisePlan: canReview && review.revise !== null && plan.length > 0,
     tools: sessionView === null ? [] : Object.values(sessionView.toolCalls),
   };
 }
@@ -536,6 +565,8 @@ export function describeSessionTurn(state: SessionState): string {
       return "The agent is waiting for input.";
     case "cancelling":
       return "The current turn is cancelling.";
+    case "cancelled":
+      return "The last turn was cancelled.";
     case "completed":
       return "The last turn completed.";
     case "closed":

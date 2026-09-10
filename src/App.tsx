@@ -514,6 +514,8 @@ export function App({
                 void conversation.setConfig(configId, value).catch(() => undefined)
               }
               onInsertCommand={conversation.insertCommand}
+              onApprovePlan={() => void conversation.reviewPlan("approve").catch(() => undefined)}
+              onRevisePlan={() => void conversation.reviewPlan("revise").catch(() => undefined)}
             />
           ) : (
             <>

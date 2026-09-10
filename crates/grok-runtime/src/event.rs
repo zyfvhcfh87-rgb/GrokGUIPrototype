@@ -130,6 +130,7 @@ pub enum SessionState {
     Working,
     WaitingForInput,
     Cancelling,
+    Cancelled,
     Completed,
     Closed,
     Failed,

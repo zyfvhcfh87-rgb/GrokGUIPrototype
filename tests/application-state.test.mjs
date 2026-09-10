@@ -527,3 +527,137 @@ test("tool cards update in place across running, completed, and failed statuses"
   assert.equal(session.toolCalls["term-1"].detail, "nope");
   assert.deepEqual(session.timeline, [{ kind: "tool", id: "term-1" }]);
 });
+
+function reduceEvents(events) {
+  return events.reduce(
+    (state, event, index) =>
+      reduceApplicationEvent(state, { generation: 1, sequence: index + 1, event }),
+    initialApplicationState(),
+  );
+}
+
+test("plan updates replace only the targeted session and increment revision", () => {
+  let state = reduceEvents([
+    { type: "session_activated", sessionId: "session-a" },
+    { type: "session_activated", sessionId: "session-b" },
+    {
+      type: "plan_changed",
+      sessionId: "session-a",
+      entries: [{ id: "a1", title: "First", description: null, status: "pending" }],
+      truncated: false,
+    },
+    {
+      type: "plan_changed",
+      sessionId: "session-b",
+      entries: [{ id: "b1", title: "Other", description: null, status: "pending" }],
+      truncated: false,
+    },
+    {
+      type: "plan_changed",
+      sessionId: "session-a",
+      entries: [
+        { id: "a1", title: "First", description: null, status: "completed" },
+        { id: "a2", title: "Next", description: "revised", status: "in_progress" },
+      ],
+      truncated: false,
+    },
+  ]);
+
+  assert.equal(state.sessions["session-a"].planRevision, 2);
+  assert.deepEqual(
+    state.sessions["session-a"].plan.map((entry) => entry.title),
+    ["First", "Next"],
+  );
+  assert.deepEqual(
+    state.sessions["session-b"].plan.map((entry) => entry.title),
+    ["Other"],
+  );
+  assert.equal(state.sessions["session-b"].planRevision, 1);
+});
+
+test("late stream events cannot resurrect a cancelled turn or another session", () => {
+  let state = reduceEvents([
+    { type: "session_activated", sessionId: "session-1" },
+    { type: "session_activated", sessionId: "session-2" },
+    { type: "session_state_changed", sessionId: "session-1", state: "working" },
+    { type: "session_state_changed", sessionId: "session-1", state: "cancelling" },
+    {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "wind-down",
+      text: "final",
+      truncated: false,
+    },
+    {
+      type: "plan_changed",
+      sessionId: "session-1",
+      entries: [{ id: "step-1", title: "Saved", description: null, status: "completed" }],
+      truncated: false,
+    },
+    { type: "session_state_changed", sessionId: "session-1", state: "working" },
+    { type: "session_state_changed", sessionId: "session-1", state: "waiting_for_input" },
+  ]);
+  assert.equal(state.sessions["session-1"].state, "cancelling");
+
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 9,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "cancelled" },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 10,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "waiting_for_input" },
+  });
+  assert.equal(state.sessions["session-1"].state, "cancelled");
+
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 11,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-2",
+      messageId: "other",
+      text: "wrong session",
+      truncated: false,
+    },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 12,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "closed" },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 13,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "working" },
+  });
+  state = reduceApplicationEvent(state, {
+    generation: 1,
+    sequence: 14,
+    event: {
+      type: "plan_changed",
+      sessionId: "session-1",
+      entries: [{ id: "late", title: "Late", description: null, status: "pending" }],
+      truncated: false,
+    },
+  });
+
+  const session = state.sessions["session-1"];
+  assert.equal(session.state, "closed");
+  assert.equal(session.messages["assistant:wind-down"].text, "final");
+  assert.equal(session.plan[0].title, "Saved");
+  assert.equal(state.sessions["session-2"].messages["assistant:other"].text, "wrong session");
+});
+
+test("runtime failure during cancellation leaves the conversation unrestored", () => {
+  let state = reduceEvents([
+    { type: "runtime_state_changed", state: "ready" },
+    { type: "session_activated", sessionId: "session-1" },
+    { type: "session_state_changed", sessionId: "session-1", state: "cancelling" },
+    { type: "runtime_failed", diagnostic: "process lost", recoverable: true },
+  ]);
+  assert.equal(state.runtime.state, "failed");
+  assert.equal(state.sessions["session-1"].state, "cancelling");
+  assert.equal(state.runtime.failure.diagnostic, "process lost");
+});

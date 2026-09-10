@@ -23,6 +23,11 @@ import {
   type ConversationPresentation,
 } from "./conversation.ts";
 import {
+  formatPlanCommand,
+  planReviewCommand,
+  type PlanReviewAction,
+} from "./plan-review.ts";
+import {
   initialApplicationState,
   reduceApplicationEvent,
   type ApplicationState,
@@ -135,15 +140,43 @@ export function createConversationController(bridge: ConversationControllerBridg
       const texts = new Set(Object.values(view?.messages ?? {}).map((chunk) => chunk.text));
       pendingUserMessages = pendingUserMessages.filter((chunk) => !texts.has(chunk.text));
     }
+    let { cancelling, sending, runtimeState } = state;
     if (envelope.generation > state.application.generation) {
       pendingUserMessages = [];
+      runtimeState = application.runtime.state;
+      cancelling = false;
+      sending = false;
+    }
+    if (event.type === "runtime_state_changed" || event.type === "runtime_failed") {
+      runtimeState = application.runtime.state;
+    }
+    if (event.type === "session_state_changed" && event.sessionId === state.sessionId) {
+      if (
+        event.state === "cancelled" ||
+        event.state === "completed" ||
+        event.state === "failed" ||
+        event.state === "closed"
+      ) {
+        cancelling = false;
+        sending = false;
+      }
+    }
+    if (
+      event.type === "runtime_failed" ||
+      (event.type === "runtime_state_changed" &&
+        (event.state === "failed" || event.state === "disconnected"))
+    ) {
+      cancelling = false;
+      sending = false;
     }
     publish({
       application,
-      runtimeState: application.runtime.state,
+      runtimeState,
       currentModeId,
       configOptions,
       pendingUserMessages,
+      cancelling,
+      sending,
     });
   };
 
@@ -160,6 +193,56 @@ export function createConversationController(bridge: ConversationControllerBridg
       );
     }
     return state.sessionId;
+  };
+
+  const submitPrompt = async (text: string) => {
+    const sessionId = requireSessionId();
+    if (text === "") {
+      return null;
+    }
+    if (!(state.capabilities?.sessions.prompt ?? false)) {
+      const failure = applicationError(
+        {
+          code: "capability_unavailable",
+          diagnostic: "This runtime does not advertise prompting.",
+          recoverable: false,
+        },
+        "This runtime does not advertise prompting.",
+        "capability_unavailable",
+      );
+      publish({ failure });
+      throw failure;
+    }
+    const pending: StreamChunk = {
+      id: `local-user:${(pendingSerial += 1)}`,
+      text,
+      truncated: false,
+    };
+    publish({
+      sending: true,
+      draft: "",
+      failure: null,
+      pendingUserMessages: [...state.pendingUserMessages, pending],
+    });
+    try {
+      const result = await bridge.sendPrompt({ sessionId, text });
+      if (state.sessionId === sessionId) {
+        publish({ sending: false, cancelling: false });
+      }
+      return result;
+    } catch (error) {
+      const failure = applicationError(error, "The prompt could not be sent.");
+      if (state.sessionId === sessionId) {
+        publish({
+          sending: false,
+          cancelling: false,
+          draft: state.draft === "" ? text : state.draft,
+          failure,
+          pendingUserMessages: state.pendingUserMessages.filter((chunk) => chunk.id !== pending.id),
+        });
+      }
+      throw failure;
+    }
   };
 
   return {
@@ -243,54 +326,31 @@ export function createConversationController(bridge: ConversationControllerBridg
     setDraft: (draft: string) => {
       publish({ draft });
     },
-    sendPrompt: async () => {
+    sendPrompt: async () => submitPrompt(state.draft.trim()),
+    reviewPlan: async (action: PlanReviewAction) => {
       const sessionId = requireSessionId();
-      const text = state.draft.trim();
-      if (text === "") {
-        return null;
-      }
-      if (!(state.capabilities?.sessions.prompt ?? false)) {
+      const commands =
+        conversationFromApplication(state.application, sessionId)?.availableCommands ?? [];
+      const command = planReviewCommand(commands, action);
+      if (command === null) {
         const failure = applicationError(
           {
             code: "capability_unavailable",
-            diagnostic: "This runtime does not advertise prompting.",
+            diagnostic: "This runtime does not advertise plan review.",
             recoverable: false,
           },
-          "This runtime does not advertise prompting.",
+          "This runtime does not advertise plan review.",
           "capability_unavailable",
         );
         publish({ failure });
         throw failure;
       }
-      const pending: StreamChunk = {
-        id: `local-user:${pendingSerial += 1}`,
-        text,
-        truncated: false,
-      };
-      publish({
-        sending: true,
-        draft: "",
-        failure: null,
-        pendingUserMessages: [...state.pendingUserMessages, pending],
-      });
-      try {
-        const result = await bridge.sendPrompt({ sessionId, text });
-        if (state.sessionId === sessionId) {
-          publish({ sending: false });
-        }
-        return result;
-      } catch (error) {
-        const failure = applicationError(error, "The prompt could not be sent.");
-        if (state.sessionId === sessionId) {
-          publish({
-            sending: false,
-            draft: state.draft === "" ? text : state.draft,
-            failure,
-            pendingUserMessages: state.pendingUserMessages.filter((chunk) => chunk.id !== pending.id),
-          });
-        }
-        throw failure;
+      const draft = formatPlanCommand(command);
+      if (action === "revise" && command.acceptsInput) {
+        publish({ draft, failure: null });
+        return null;
       }
+      return submitPrompt(draft.trim());
     },
     cancelPrompt: async () => {
       const sessionId = requireSessionId();
@@ -307,12 +367,21 @@ export function createConversationController(bridge: ConversationControllerBridg
         publish({ failure });
         throw failure;
       }
+      const sessionState = conversationFromApplication(state.application, sessionId)?.state ?? null;
+      if (state.cancelling || sessionState === "cancelling") {
+        return { acknowledged: true };
+      }
+      if (
+        !state.sending &&
+        sessionState !== "working" &&
+        sessionState !== "waiting_for_input"
+      ) {
+        return { acknowledged: true };
+      }
       publish({ cancelling: true, failure: null, interactionEpoch: state.interactionEpoch + 1 });
       try {
         await bridge.cancelPrompt({ sessionId });
-        if (state.sessionId === sessionId) {
-          publish({ cancelling: false });
-        }
+        return { acknowledged: true };
       } catch (error) {
         const failure = applicationError(error, "The current turn could not be cancelled.");
         if (state.sessionId === sessionId) {

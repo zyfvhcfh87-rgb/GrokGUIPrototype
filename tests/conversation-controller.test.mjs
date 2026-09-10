@@ -224,3 +224,144 @@ test("external URLs are opened only through the reviewed command", async () => {
     { command: "url", request: { url: "https://example.com/docs" } },
   ]);
 });
+
+async function workingController(overrides = {}) {
+  const ready = await readyController(overrides);
+  ready.harness.emit({
+    generation: 1,
+    sequence: 1,
+    event: { type: "runtime_state_changed", state: "ready" },
+  });
+  ready.harness.emit({
+    generation: 1,
+    sequence: 2,
+    event: { type: "session_activated", sessionId: "session-1" },
+  });
+  ready.harness.emit({
+    generation: 1,
+    sequence: 3,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "working" },
+  });
+  return ready;
+}
+
+test("cancel success stays cancelling until the turn settles as cancelled", async () => {
+  const { controller, harness } = await workingController();
+  const pending = controller.cancelPrompt();
+  assert.equal(controller.presentation().composer.kind, "cancelling");
+  assert.equal(controller.presentation().composer.canCancel, false);
+  await pending;
+  assert.equal(controller.getState().cancelling, true);
+  harness.emit({
+    generation: 1,
+    sequence: 4,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "cancelled" },
+  });
+  assert.equal(controller.presentation().composer.kind, "cancelled");
+  assert.deepEqual(harness.calls, [{ command: "cancel", request: { sessionId: "session-1" } }]);
+});
+
+test("duplicate cancel is idempotent and idle cancel does not target a turn", async () => {
+  const { controller, harness } = await workingController();
+  await controller.cancelPrompt();
+  await controller.cancelPrompt();
+  assert.deepEqual(harness.calls, [{ command: "cancel", request: { sessionId: "session-1" } }]);
+
+  const idle = await readyController();
+  assert.deepEqual(await idle.controller.cancelPrompt(), { acknowledged: true });
+  assert.deepEqual(idle.harness.calls, []);
+});
+
+test("cancel rejection and timeout surface the failure without leaving a fake cancelled turn", async () => {
+  const rejected = await workingController({
+    cancelPrompt: async () => {
+      throw {
+        code: "protocol_request_failed",
+        diagnostic: "runtime rejected cancellation",
+        recoverable: true,
+      };
+    },
+  });
+  await assert.rejects(
+    () => rejected.controller.cancelPrompt(),
+    (error) => error.code === "protocol_request_failed",
+  );
+  assert.equal(rejected.controller.getState().cancelling, false);
+  assert.equal(rejected.controller.presentation().composer.kind, "working");
+
+  const timedOut = await workingController({
+    cancelPrompt: async () => {
+      throw {
+        code: "request_timed_out",
+        diagnostic: "runtime command timed out",
+        recoverable: true,
+      };
+    },
+  });
+  await assert.rejects(
+    () => timedOut.controller.cancelPrompt(),
+    (error) => error.code === "request_timed_out",
+  );
+  assert.equal(timedOut.controller.getState().cancelling, false);
+});
+
+test("process loss during cancellation fails the conversation instead of restoring the turn", async () => {
+  const { controller, harness } = await workingController();
+  const pending = controller.cancelPrompt();
+  harness.emit({
+    generation: 1,
+    sequence: 4,
+    event: { type: "runtime_failed", diagnostic: "process lost", recoverable: true },
+  });
+  await pending;
+  assert.equal(controller.presentation().kind, "failed");
+  assert.equal(controller.getState().cancelling, false);
+});
+
+test("plan approval uses the advertised command and stays unavailable otherwise", async () => {
+  const { controller, harness } = await readyController();
+  harness.emit({
+    generation: 1,
+    sequence: 1,
+    event: { type: "session_activated", sessionId: "session-1" },
+  });
+  harness.emit({
+    generation: 1,
+    sequence: 2,
+    event: {
+      type: "available_commands_changed",
+      sessionId: "session-1",
+      commands: [
+        { name: "approve_plan", description: "Approve the current plan", acceptsInput: false },
+        { name: "revise_plan", description: "Revise the current plan", acceptsInput: true },
+      ],
+      truncated: false,
+    },
+  });
+  harness.emit({
+    generation: 1,
+    sequence: 3,
+    event: {
+      type: "plan_changed",
+      sessionId: "session-1",
+      entries: [{ id: "step-1", title: "Inspect", description: null, status: "pending" }],
+      truncated: false,
+    },
+  });
+
+  await controller.reviewPlan("approve");
+  assert.deepEqual(harness.calls, [
+    { command: "prompt", request: { sessionId: "session-1", text: "/approve_plan" } },
+  ]);
+
+  await controller.reviewPlan("revise");
+  assert.equal(controller.getState().draft, "/revise_plan ");
+  assert.equal(harness.calls.length, 1);
+
+  const hidden = await readyController();
+  await assert.rejects(
+    () => hidden.controller.reviewPlan("approve"),
+    (error) => error.code === "capability_unavailable",
+  );
+  assert.deepEqual(hidden.harness.calls, []);
+});

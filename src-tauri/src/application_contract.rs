@@ -1383,6 +1383,7 @@ pub enum ApplicationSessionState {
     Working,
     WaitingForInput,
     Cancelling,
+    Cancelled,
     Completed,
     Closed,
     Failed,
@@ -1794,6 +1795,7 @@ impl From<grok_runtime::SessionState> for ApplicationSessionState {
             grok_runtime::SessionState::Working => Self::Working,
             grok_runtime::SessionState::WaitingForInput => Self::WaitingForInput,
             grok_runtime::SessionState::Cancelling => Self::Cancelling,
+            grok_runtime::SessionState::Cancelled => Self::Cancelled,
             grok_runtime::SessionState::Completed => Self::Completed,
             grok_runtime::SessionState::Closed => Self::Closed,
             grok_runtime::SessionState::Failed => Self::Failed,
@@ -2728,6 +2730,7 @@ mod tests {
                 ApplicationSessionState::Working,
                 ApplicationSessionState::WaitingForInput,
                 ApplicationSessionState::Cancelling,
+                ApplicationSessionState::Cancelled,
                 ApplicationSessionState::Completed,
                 ApplicationSessionState::Closed,
                 ApplicationSessionState::Failed

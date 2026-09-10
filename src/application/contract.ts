@@ -40,6 +40,7 @@ export type SessionState =
   | "working"
   | "waiting_for_input"
   | "cancelling"
+  | "cancelled"
   | "completed"
   | "closed"
   | "failed";
@@ -752,6 +753,7 @@ export const APPLICATION_ENUM_VALUES = {
     "working",
     "waiting_for_input",
     "cancelling",
+    "cancelled",
     "completed",
     "closed",
     "failed",

@@ -108,7 +108,7 @@
   },
   "enumValues": {
     "runtimeState": ["connecting", "authenticating", "ready", "working", "waiting_for_input", "failed", "disconnected"],
-    "sessionState": ["creating", "ready", "working", "waiting_for_input", "cancelling", "completed", "closed", "failed"],
+    "sessionState": ["creating", "ready", "working", "waiting_for_input", "cancelling", "cancelled", "completed", "closed", "failed"],
     "activityStatus": ["pending", "running", "waiting_for_input", "completed", "failed", "cancelled"],
     "toolCallKind": ["tool", "terminal_command", "background_task", "subagent", "other"],
     "permissionDecision": ["allow_once", "allow_always", "deny_once", "deny_always", "cancel"],

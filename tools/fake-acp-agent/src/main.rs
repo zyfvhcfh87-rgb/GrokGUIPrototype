@@ -528,6 +528,10 @@ fn run_lifecycle(
                 write_frame(&mut output, result_response(id, json!({})))?;
             }
             "session/prompt" if state.authenticated && state.session_open => {
+                if let Some(action) = plan_review_action(&frame) {
+                    run_plan_review_prompt(&mut output, id, action)?;
+                    continue;
+                }
                 state.prompt_count += 1;
                 if lifecycle_fault == Some(LifecycleFault::HangPrompt) && state.prompt_count == 1 {
                     continue;
@@ -753,7 +757,7 @@ fn run_prompt(
     )
 }
 
-fn initial_prompt_updates() -> [Value; 4] {
+fn initial_prompt_updates() -> [Value; 5] {
     [
         json!({
             "sessionUpdate": "agent_thought_chunk",
@@ -764,6 +768,20 @@ fn initial_prompt_updates() -> [Value; 4] {
             "messageId": "message-thought-001"
         }),
         agent_message("I will inspect the sanitized fixture.", "message-agent-001"),
+        json!({
+            "sessionUpdate": "available_commands_update",
+            "availableCommands": [
+                {
+                    "name": "approve_plan",
+                    "description": "Approve the current plan"
+                },
+                {
+                    "name": "revise_plan",
+                    "description": "Revise the current plan",
+                    "input": { "hint": "Describe the revision" }
+                }
+            ]
+        }),
         json!({
             "sessionUpdate": "plan",
             "entries": [
@@ -966,6 +984,67 @@ fn finish_cancelled_prompt(output: &mut impl Write, prompt_id: Value) -> io::Res
     write_frame(
         output,
         result_response(prompt_id, json!({ "stopReason": "cancelled" })),
+    )
+}
+
+fn prompt_text(frame: &Value) -> String {
+    frame
+        .pointer("/params/prompt")
+        .and_then(Value::as_array)
+        .and_then(|blocks| {
+            blocks.iter().find_map(|block| {
+                block
+                    .get("text")
+                    .and_then(Value::as_str)
+                    .or_else(|| block.pointer("/content/text").and_then(Value::as_str))
+            })
+        })
+        .unwrap_or("")
+        .to_owned()
+}
+
+fn plan_review_action(frame: &Value) -> Option<&'static str> {
+    let text = prompt_text(frame);
+    let command = text.trim().trim_start_matches('/').split_whitespace().next()?;
+    match command {
+        "approve_plan" | "approve-plan" | "plan_approve" | "plan-approve" => Some("approve"),
+        "revise_plan" | "revise-plan" | "plan_revise" | "plan-revise" => Some("revise"),
+        _ => None,
+    }
+}
+
+fn run_plan_review_prompt(
+    output: &mut impl Write,
+    prompt_id: Value,
+    action: &str,
+) -> io::Result<()> {
+    let (first_status, message) = if action == "approve" {
+        ("completed", "The advertised plan was approved.")
+    } else {
+        ("in_progress", "The advertised plan was revised.")
+    };
+    write_frame(
+        output,
+        session_update(json!({
+            "sessionUpdate": "plan",
+            "entries": [
+                {
+                    "content": "Request scoped permission",
+                    "priority": "high",
+                    "status": first_status
+                },
+                {
+                    "content": "Report the deterministic result",
+                    "priority": "medium",
+                    "status": "pending"
+                }
+            ]
+        })),
+    )?;
+    write_frame(output, session_update(agent_message(message, "message-plan-review-001")))?;
+    write_frame(
+        output,
+        result_response(prompt_id, json!({ "stopReason": "end_turn" })),
     )
 }
 

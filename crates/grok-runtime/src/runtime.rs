@@ -1021,7 +1021,7 @@ impl RuntimeShared {
         Ok(())
     }
 
-    fn end_prompt(&self, session_id: &str) {
+    fn end_prompt(&self, session_id: &str, settlement: SessionState) {
         let none_active = {
             let mut active = self
                 .active_prompts
@@ -1030,20 +1030,45 @@ impl RuntimeShared {
             active.remove(session_id);
             active.is_empty()
         };
-        let lifecycle_blocked = {
+        let (lifecycle_blocked, cancelled) = {
             let gate = self
                 .interaction_gate
                 .lock()
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
-            gate.closing_sessions.contains(session_id)
-                || gate.unavailable_sessions.contains(session_id)
+            (
+                gate.closing_sessions.contains(session_id)
+                    || gate.unavailable_sessions.contains(session_id),
+                gate.cancelled_sessions.contains(session_id),
+            )
         };
         if !lifecycle_blocked {
-            self.session_state(session_id, SessionState::Ready);
+            self.session_state(
+                session_id,
+                if cancelled {
+                    SessionState::Cancelled
+                } else {
+                    settlement
+                },
+            );
         }
         if none_active {
             self.transition(RuntimeState::Ready);
         }
+    }
+
+    fn should_send_turn_cancellation(&self, session_id: &str) -> bool {
+        let has_active = self
+            .active_prompts
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(session_id);
+        let already_cancelling = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .cancelled_sessions
+            .contains(session_id);
+        has_active && !already_cancelling
     }
 
     fn handle_session_notification(&self, notification: SessionNotification) {
@@ -2574,14 +2599,30 @@ async fn execute_command(
                         true,
                     )
                 });
-            shared.end_prompt(&session_id);
+            let settlement = match &response {
+                Ok(result)
+                    if matches!(
+                        normalize_stop_reason(result.stop_reason),
+                        RuntimePromptStopReason::Cancelled
+                    ) =>
+                {
+                    SessionState::Cancelled
+                }
+                Ok(_) => SessionState::Completed,
+                Err(_) => SessionState::Ready,
+            };
+            shared.end_prompt(&session_id, settlement);
             let response = response?;
             Ok(RuntimeResponse::PromptCompleted {
                 stop_reason: normalize_stop_reason(response.stop_reason),
             })
         }
         RuntimeCommand::Cancel { session_id } => {
+            require_capability(capabilities.sessions.cancel, "prompt cancellation")?;
             let session_id = validate_session_id(session_id)?;
+            if !shared.should_send_turn_cancellation(&session_id) {
+                return Ok(RuntimeResponse::Acknowledged);
+            }
             shared.cancel_session_interactions(&session_id).await;
             connection
                 .send_notification(CancelNotification::new(session_id))
