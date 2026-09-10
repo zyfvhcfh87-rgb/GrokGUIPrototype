@@ -10,6 +10,8 @@ export function ActivityPane({
   onModeChange,
   onConfigChange,
   onInsertCommand,
+  onApprovePlan,
+  onRevisePlan,
 }: {
   presentation: ConversationPresentation;
   controlBusy: boolean;
@@ -18,6 +20,8 @@ export function ActivityPane({
   onModeChange: (modeId: string) => void;
   onConfigChange: (configId: string, value: ConfigValue) => void;
   onInsertCommand: (name: string, acceptsInput: boolean) => void;
+  onApprovePlan: () => void;
+  onRevisePlan: () => void;
 }) {
   const { controls, activity } = presentation;
   const usage = activity.usage;
@@ -149,10 +153,12 @@ export function ActivityPane({
         </article>
       ) : null}
 
-      {activity.plan.length > 0 ? (
+      {activity.planHeadline === "empty" ? (
+        <p className="activity-pane__muted">No saved plan for this session.</p>
+      ) : (
         <article className="stream-card">
           <header>
-            <strong>Plan</strong>
+            <strong>{activity.planHeadline === "replaced" ? "Replaced plan" : "Saved plan"}</strong>
           </header>
           <ol className="plan-list">
             {activity.plan.map((entry) => (
@@ -163,8 +169,22 @@ export function ActivityPane({
               </li>
             ))}
           </ol>
+          {activity.canApprovePlan || activity.canRevisePlan ? (
+            <div className="plan-actions">
+              {activity.canRevisePlan ? (
+                <button className="button" type="button" onClick={onRevisePlan}>
+                  Revise
+                </button>
+              ) : null}
+              {activity.canApprovePlan ? (
+                <button className="button button--primary" type="button" onClick={onApprovePlan}>
+                  Approve
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </article>
-      ) : null}
+      )}
 
       {activity.tools.length > 0 ? (
         <ul className="activity-tools" aria-label="Tool activity">

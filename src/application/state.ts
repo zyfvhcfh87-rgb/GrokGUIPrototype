@@ -67,6 +67,7 @@ export type SessionViewState = {
   permissions: Record<string, PermissionRequestState>;
   elicitations: Record<string, ElicitationRequestState>;
   plan: PlanEntry[];
+  planRevision: number;
   usage: Usage | null;
   availableCommands: AvailableCommand[];
   currentModeId: string | null;
@@ -321,6 +322,7 @@ function applyEvent(state: ApplicationState, event: ApplicationEvent): Applicati
     existing !== undefined &&
     (event.type === "permission_requested" || event.type === "elicitation_requested") &&
     (existing.state === "cancelling" ||
+      existing.state === "cancelled" ||
       existing.state === "completed" ||
       existing.state === "failed")
   ) {
@@ -346,6 +348,7 @@ function initialSessionState(): SessionViewState {
     permissions: {},
     elicitations: {},
     plan: [],
+    planRevision: 0,
     usage: null,
     availableCommands: [],
     currentModeId: null,
@@ -361,7 +364,15 @@ function reduceSessionEvent(
 ): SessionViewState {
   switch (event.type) {
     case "session_state_changed":
+      if (
+        (session.state === "cancelling" &&
+          (event.state === "working" || event.state === "waiting_for_input")) ||
+        (session.state === "cancelled" && event.state === "waiting_for_input")
+      ) {
+        return session;
+      }
       return event.state === "cancelling" ||
+        event.state === "cancelled" ||
         event.state === "completed" ||
         event.state === "closed" ||
         event.state === "failed"
@@ -420,7 +431,7 @@ function reduceSessionEvent(
         },
       };
     case "plan_changed":
-      return { ...session, plan: event.entries };
+      return { ...session, plan: event.entries, planRevision: session.planRevision + 1 };
     case "usage_changed":
       return { ...session, usage: event.usage };
     case "session_metadata_changed":

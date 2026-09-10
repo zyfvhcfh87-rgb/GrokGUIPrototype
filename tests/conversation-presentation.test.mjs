@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   MAX_TERMINAL_DISPLAY_CHARS,
+  describeActivity,
   describeComposer,
   describeSessionControls,
   projectConversation,
@@ -22,6 +23,7 @@ function initialSessionForTest() {
     permissions: {},
     elicitations: {},
     plan: [],
+    planRevision: 0,
     usage: null,
     availableCommands: [],
     currentModeId: null,
@@ -301,6 +303,29 @@ test("composer working, waiting, and cancel states follow advertised support", (
   });
   assert.equal(unavailable.kind, "unavailable");
   assert.equal(unavailable.canSend, false);
+
+  const cancelled = describeComposer({
+    sessionId: "session-1",
+    sessionState: "cancelled",
+    capabilities,
+    runtimeState: "ready",
+    sending: false,
+    cancelling: false,
+  });
+  assert.equal(cancelled.kind, "cancelled");
+  assert.equal(cancelled.canSend, true);
+  assert.equal(cancelled.canCancel, false);
+
+  const completed = describeComposer({
+    sessionId: "session-1",
+    sessionState: "completed",
+    capabilities,
+    runtimeState: "ready",
+    sending: false,
+    cancelling: false,
+  });
+  assert.equal(completed.kind, "completed");
+  assert.equal(completed.canSend, true);
 });
 
 test("the conversation surface stays presentable when a session is selected", () => {
@@ -385,4 +410,63 @@ test("failed and disconnected conversations expose a recoverable action", () => 
     runtimeFailure: { diagnostic: "incompatible", recoverable: false },
   });
   assert.equal(incompatible.canRecover, false);
+});
+
+test("plan review actions appear only when advertised and the composer can send", () => {
+  const ready = describeComposer({
+    sessionId: "session-1",
+    sessionState: "completed",
+    capabilities,
+    runtimeState: "ready",
+    sending: false,
+    cancelling: false,
+  });
+  const hidden = describeActivity(
+    {
+      ...initialSessionForTest(),
+      plan: [{ id: "step-1", title: "Inspect", description: null, status: "in_progress" }],
+      planRevision: 1,
+    },
+    ready,
+  );
+  assert.equal(hidden.planHeadline, "saved");
+  assert.equal(hidden.canApprovePlan, false);
+  assert.equal(hidden.canRevisePlan, false);
+
+  const advertised = describeActivity(
+    {
+      ...initialSessionForTest(),
+      plan: [{ id: "step-1", title: "Inspect", description: null, status: "in_progress" }],
+      planRevision: 2,
+      availableCommands: [
+        { name: "approve_plan", description: "Approve the current plan", acceptsInput: false },
+        { name: "revise_plan", description: "Revise the current plan", acceptsInput: true },
+      ],
+    },
+    ready,
+  );
+  assert.equal(advertised.planHeadline, "replaced");
+  assert.equal(advertised.canApprovePlan, true);
+  assert.equal(advertised.canRevisePlan, true);
+
+  const working = describeComposer({
+    sessionId: "session-1",
+    sessionState: "working",
+    capabilities,
+    runtimeState: "working",
+    sending: true,
+    cancelling: false,
+  });
+  const busy = describeActivity(
+    {
+      ...initialSessionForTest(),
+      plan: [{ id: "step-1", title: "Inspect", description: null, status: "in_progress" }],
+      planRevision: 1,
+      availableCommands: [
+        { name: "approve_plan", description: "Approve the current plan", acceptsInput: false },
+      ],
+    },
+    working,
+  );
+  assert.equal(busy.canApprovePlan, false);
 });

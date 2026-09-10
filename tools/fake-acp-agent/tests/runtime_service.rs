@@ -996,6 +996,224 @@ async fn timed_out_close_stays_fail_closed_until_explicit_reactivation() {
     runtime.stop().await.expect("runtime should stop");
 }
 
+#[tokio::test]
+async fn cancellation_is_idempotent_and_settles_cancelled_without_ready() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    complete_first_fixture_prompt(&runtime, &session.session_id).await;
+    let mut events = runtime.subscribe();
+
+    let prompt_runtime = runtime.clone();
+    let session_id = session.session_id.clone();
+    let pending_prompt = tokio::spawn(async move {
+        prompt_runtime
+            .execute(RuntimeCommand::Prompt {
+                session_id,
+                text: "Wait until cancelled.".to_owned(),
+            })
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    for _ in 0..2 {
+        assert_eq!(
+            runtime
+                .execute(RuntimeCommand::Cancel {
+                    session_id: session.session_id.clone(),
+                })
+                .await
+                .expect("cancel should be acknowledged"),
+            RuntimeResponse::Acknowledged
+        );
+    }
+    assert_eq!(
+        pending_prompt
+            .await
+            .expect("cancelled prompt task should join")
+            .expect("cancelled prompt should return a semantic result"),
+        RuntimeResponse::PromptCompleted {
+            stop_reason: RuntimePromptStopReason::Cancelled,
+        }
+    );
+
+    let mut saw_cancelling = false;
+    let mut saw_cancelled = false;
+    while let Ok(event) = events.try_recv() {
+        match event {
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Cancelling,
+            } if session_id == &session.session_id => saw_cancelling = true,
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Cancelled,
+            } if session_id == &session.session_id => saw_cancelled = true,
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Ready,
+            } if session_id == &session.session_id && saw_cancelling => {
+                panic!("cancelled turns must not return to ready");
+            }
+            RuntimeEvent::SessionStateChanged {
+                ref session_id,
+                state: grok_runtime::SessionState::Working,
+            } if session_id == &session.session_id && saw_cancelling => {
+                panic!("late working must not resurrect a cancelled turn");
+            }
+            _ => {}
+        }
+    }
+    assert!(saw_cancelling, "cancel should emit cancelling");
+    assert!(saw_cancelled, "settled cancel should emit cancelled");
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn idle_cancellation_is_a_no_op_for_the_active_turn() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    assert_eq!(
+        runtime
+            .execute(RuntimeCommand::Cancel {
+                session_id: session.session_id.clone(),
+            })
+            .await
+            .expect("idle cancel should be acknowledged"),
+        RuntimeResponse::Acknowledged
+    );
+    complete_first_fixture_prompt(&runtime, &session.session_id).await;
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn advertised_plan_review_replaces_the_saved_plan() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    complete_first_fixture_prompt(&runtime, &session.session_id).await;
+    let mut events = runtime.subscribe();
+    let response = runtime
+        .execute(RuntimeCommand::Prompt {
+            session_id: session.session_id.clone(),
+            text: "/approve_plan".to_owned(),
+        })
+        .await
+        .expect("advertised plan approval should run");
+    assert_eq!(
+        response,
+        RuntimeResponse::PromptCompleted {
+            stop_reason: RuntimePromptStopReason::EndTurn,
+        }
+    );
+    let mut saw_approved_plan = false;
+    let mut saw_completed = false;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !(saw_approved_plan && saw_completed) {
+            match events
+                .recv()
+                .await
+                .expect("runtime event stream should stay open")
+            {
+                RuntimeEvent::PlanChanged { entries, .. }
+                    if entries
+                        .first()
+                        .is_some_and(|entry| entry.status == grok_runtime::PlanEntryStatus::Completed) =>
+                {
+                    saw_approved_plan = true;
+                }
+                RuntimeEvent::SessionStateChanged {
+                    ref session_id,
+                    state: grok_runtime::SessionState::Completed,
+                } if session_id == &session.session_id => saw_completed = true,
+                _ => {}
+            }
+        }
+    })
+    .await
+    .expect("timed out waiting for advertised plan review");
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn process_loss_during_a_hung_turn_fails_the_prompt() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "hang-prompt"])
+            .auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    let prompt_runtime = runtime.clone();
+    let session_id = session.session_id.clone();
+    let pending_prompt = tokio::spawn(async move {
+        prompt_runtime
+            .execute(RuntimeCommand::Prompt {
+                session_id,
+                text: "This turn hangs until the process is lost.".to_owned(),
+            })
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        runtime
+            .execute(RuntimeCommand::Cancel {
+                session_id: session.session_id,
+            })
+            .await
+            .expect("cancel should be acknowledged"),
+        RuntimeResponse::Acknowledged
+    );
+    runtime.stop().await.expect("runtime should stop");
+    let error = pending_prompt
+        .await
+        .expect("hung prompt task should join")
+        .expect_err("process loss must fail the hung prompt");
+    assert_ne!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+}
+
 async fn complete_first_fixture_prompt(runtime: &GrokRuntime, session_id: &str) {
     let mut events = runtime.subscribe();
     let prompt_runtime = runtime.clone();

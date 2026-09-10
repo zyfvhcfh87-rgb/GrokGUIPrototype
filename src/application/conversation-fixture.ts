@@ -154,6 +154,8 @@ function dispatchFixtureCommand(input: {
         sessionId: session.sessionId,
         commands: [
           { name: "review", description: "Review the current change", acceptsInput: false },
+          { name: "approve_plan", description: "Approve the current plan", acceptsInput: false },
+          { name: "revise_plan", description: "Revise the current plan", acceptsInput: true },
         ],
         truncated: false,
       });
@@ -258,7 +260,7 @@ function dispatchFixtureCommand(input: {
       emit({
         type: "session_state_changed",
         sessionId: FIXTURE_SESSION_ID,
-        state: "ready",
+        state: "completed",
       });
       return { stopReason: "end_turn" };
     }
@@ -267,7 +269,12 @@ function dispatchFixtureCommand(input: {
       emit({
         type: "session_state_changed",
         sessionId: FIXTURE_SESSION_ID,
-        state: "ready",
+        state: "cancelling",
+      });
+      emit({
+        type: "session_state_changed",
+        sessionId: FIXTURE_SESSION_ID,
+        state: "cancelled",
       });
       return { acknowledged: true };
     case "permission_respond":

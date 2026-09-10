@@ -96,7 +96,7 @@ test("elicitation accept and cancel send only typed values, with no persisted in
   assert.deepEqual(cancelled.calls[0].decision, { type: "cancel" });
 });
 
-for (const state of ["cancelling", "completed", "closed", "failed"]) {
+for (const state of ["cancelling", "cancelled", "completed", "closed", "failed"]) {
   test(`${state} expires permission and elicitation callbacks`, async () => {
     for (const request of [permission(), elicitation()]) {
       const h = harness(); h.emit(request); const target = h.target();

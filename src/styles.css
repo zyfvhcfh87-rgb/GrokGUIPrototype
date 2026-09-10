@@ -919,7 +919,9 @@ button:focus-visible {
 
 .composer__state--working,
 .composer__state--waiting,
-.composer__state--cancelling {
+.composer__state--cancelling,
+.composer__state--cancelled,
+.composer__state--completed {
   color: #b7bef7;
 }
 
@@ -1035,6 +1037,13 @@ button:focus-visible {
   color: #7f8593;
   font-size: 0.6rem;
   text-transform: capitalize;
+}
+
+.plan-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.45rem;
+  margin-top: 0.7rem;
 }
 
 .usage-list {
