@@ -70,6 +70,20 @@ const decisionLabels: Record<PermissionDecision, string> = {
   allow_once: "Allow once", allow_always: "Always allow",
 };
 
+export function permissionConsequenceTone(
+  request: PermissionRequestState,
+): "destructive" | "review" {
+  const scope = request.scope;
+  const text = `${request.title} ${request.consequence ?? ""} ${scope.type === "command" ? scope.command : ""}`;
+  if (scope.type === "filesystem" && (scope.operation === "delete" || scope.operation === "move")) {
+    return "destructive";
+  }
+  if (/(?:\brm\b|\bdel\b|\bremove\b|\bdelete\b|overwrit)/iu.test(text)) {
+    return "destructive";
+  }
+  return "review";
+}
+
 export function permissionActions(request: PermissionRequestState) {
   const decisions = request.availableDecisions;
   const valid = Array.isArray(decisions) && decisions.length > 0 && decisions.length <= 5 &&

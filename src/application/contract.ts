@@ -25,6 +25,8 @@ export const APPLICATION_COMMANDS = {
   setSessionConfig: "session_set_config",
   respondToPermission: "permission_respond",
   respondToElicitation: "elicitation_respond",
+  getPresentationPreferences: "presentation_get",
+  setPresentationPreferences: "presentation_set",
 } as const;
 
 export type RuntimeState =
@@ -427,6 +429,19 @@ export type ElicitationResponseRequest = {
   decision: ElicitationDecision;
 };
 
+export type PresentationTheme = "system" | "light" | "dark";
+export type PresentationMotion = "system" | "reduce";
+export type OnboardingStatus = "unseen" | "skipped" | "completed";
+export type PresentationPreferences = {
+  theme: PresentationTheme;
+  motion: PresentationMotion;
+  projectsOpen: boolean;
+  detailsOpen: boolean;
+  projectsWidth: number;
+  detailsWidth: number;
+  onboarding: OnboardingStatus;
+};
+
 export type SetupStatus = {
   runtimeAvailable: boolean;
   executableState: "available" | "missing" | "invalid";
@@ -642,6 +657,15 @@ export const APPLICATION_DTO_FIELDS = {
   elicitationResponseRequest: fieldsOf<ElicitationResponseRequest>()([
     "decision",
     "interactionId",
+  ]),
+  presentationPreferences: fieldsOf<PresentationPreferences>()([
+    "detailsOpen",
+    "detailsWidth",
+    "motion",
+    "onboarding",
+    "projectsOpen",
+    "projectsWidth",
+    "theme",
   ]),
   setupStatus: fieldsOf<SetupStatus>()([
     "executableSource",
@@ -950,4 +974,7 @@ export const APPLICATION_ENUM_VALUES = {
     "windows_job",
     "direct_child",
   ]),
+  presentationTheme: valuesOf<PresentationTheme>()(["system", "light", "dark"]),
+  presentationMotion: valuesOf<PresentationMotion>()(["system", "reduce"]),
+  onboardingStatus: valuesOf<OnboardingStatus>()(["unseen", "skipped", "completed"]),
 } as const;

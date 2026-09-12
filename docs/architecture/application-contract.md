@@ -7,6 +7,7 @@ Issue #8 defines the reviewed interface between the native application core and 
 The desktop exposes only these command groups:
 
 - setup, workspace, and links: `setup_status`, `workspace_pick`, `workspace_validate`, `workspace_recent_list`, `workspace_recent_remove`, `workspace_changes`, `open_external_url`;
+- GUI presentation: `presentation_get`, `presentation_set` (theme, motion, panel layout, onboarding; no GrokRuntime involvement);
 - runtime lifecycle: `runtime_snapshot`, `runtime_diagnostics`, `runtime_start`, `runtime_stop`, `runtime_restart`;
 - sessions: `session_new`, `session_list`, `session_load`, `session_resume`, `session_close`;
 - turns and controls: `prompt_send`, `prompt_cancel`, `session_set_mode`, `session_set_model`, `session_set_config`;

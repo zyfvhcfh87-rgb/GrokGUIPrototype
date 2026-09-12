@@ -47,11 +47,31 @@ const fixtureSession = (): Session => ({
   truncated: false,
 });
 
-export function createConversationFixtureTransport(showInteractions = false): ApplicationTransport {
+export function createConversationFixtureTransport(
+  showInteractions = false,
+  onboarding: "unseen" | "skipped" | "completed" = "completed",
+): ApplicationTransport {
   const listeners = new Set<(event: { payload: ApplicationEventEnvelope }) => void>();
   let sequence = 0;
   const generation = 1;
   const pendingRequestIds = new Set<string>();
+  let presentationState: {
+    theme: "system" | "light" | "dark";
+    motion: "system" | "reduce";
+    projectsOpen: boolean;
+    detailsOpen: boolean;
+    projectsWidth: number;
+    detailsWidth: number;
+    onboarding: "unseen" | "skipped" | "completed";
+  } = {
+    theme: "system",
+    motion: "system",
+    projectsOpen: true,
+    detailsOpen: true,
+    projectsWidth: 260,
+    detailsWidth: 280,
+    onboarding,
+  };
 
   const emit = (event: ApplicationEvent) => {
     if (event.type === "permission_requested" || event.type === "elicitation_requested") pendingRequestIds.add(event.interactionId);
@@ -75,6 +95,10 @@ export function createConversationFixtureTransport(showInteractions = false): Ap
           sequence,
           showInteractions,
           pendingRequestIds,
+          presentation: presentationState,
+          setPresentation: (next) => {
+            presentationState = next;
+          },
         }),
       );
     },
@@ -98,6 +122,24 @@ function dispatchFixtureCommand(input: {
   sequence: number;
   showInteractions: boolean;
   pendingRequestIds: Set<string>;
+  presentation: {
+    theme: "system" | "light" | "dark";
+    motion: "system" | "reduce";
+    projectsOpen: boolean;
+    detailsOpen: boolean;
+    projectsWidth: number;
+    detailsWidth: number;
+    onboarding: "unseen" | "skipped" | "completed";
+  };
+  setPresentation: (next: {
+    theme: "system" | "light" | "dark";
+    motion: "system" | "reduce";
+    projectsOpen: boolean;
+    detailsOpen: boolean;
+    projectsWidth: number;
+    detailsWidth: number;
+    onboarding: "unseen" | "skipped" | "completed";
+  }) => void;
 }): unknown {
   const { command, request, emit, generation, sequence } = input;
   switch (command) {
@@ -119,9 +161,9 @@ function dispatchFixtureCommand(input: {
       };
     case "workspace_recent_list":
       return {
-        workspaces: [
-          { path: FIXTURE_WORKSPACE, available: true, lastSessionId: FIXTURE_SESSION_ID },
-        ],
+        workspaces: input.presentation.onboarding === "unseen"
+          ? []
+          : [{ path: FIXTURE_WORKSPACE, available: true, lastSessionId: FIXTURE_SESSION_ID }],
       };
     case "workspace_validate":
     case "workspace_pick":
@@ -326,6 +368,28 @@ function dispatchFixtureCommand(input: {
         stderrReadErrors: 0,
         processContainment: "direct_child",
       };
+    case "presentation_get":
+      return input.presentation;
+    case "presentation_set": {
+      const next = {
+        theme: request.theme === "light" || request.theme === "dark" || request.theme === "system"
+          ? request.theme
+          : input.presentation.theme,
+        motion: request.motion === "reduce" || request.motion === "system"
+          ? request.motion
+          : input.presentation.motion,
+        projectsOpen: Boolean(request.projectsOpen),
+        detailsOpen: Boolean(request.detailsOpen),
+        projectsWidth: Number(request.projectsWidth) || 260,
+        detailsWidth: Number(request.detailsWidth) || 280,
+        onboarding: request.onboarding === "skipped" || request.onboarding === "completed" ||
+            request.onboarding === "unseen"
+          ? request.onboarding
+          : input.presentation.onboarding,
+      };
+      input.setPresentation(next);
+      return next;
+    }
     default:
       throw {
         code: "invalid_request",

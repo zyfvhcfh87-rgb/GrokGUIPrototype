@@ -149,6 +149,77 @@ export function describeLaunchState(input: {
   }
 }
 
+export type RecoveryKind =
+  | "setup"
+  | "authentication"
+  | "protocol"
+  | "transient"
+  | "stale_workspace"
+  | "stale_session";
+
+export type RecoveryGuidance = {
+  kind: RecoveryKind;
+  title: string;
+  detail: string;
+};
+
+export function describeRecovery(input: {
+  setup: SetupStatus | null;
+  runtimeState: RuntimeState;
+  failure: ApplicationError | null;
+  workspaceFailure: ApplicationError | null;
+  sessionFailure: ApplicationError | null;
+}): RecoveryGuidance | null {
+  const launch = describeLaunchState({
+    setup: input.setup,
+    runtimeState: input.runtimeState,
+    failure: input.failure,
+  });
+  if (launch.kind === "incompatible") {
+    return {
+      kind: "protocol",
+      title: "Protocol mismatch",
+      detail: "This Grok Build version did not negotiate ACP v1. Update Grok Build, then restart the app. Do not continue with guessed protocol behavior.",
+    };
+  }
+  if (launch.kind === "unsupported_authentication" || input.failure?.code === "authentication_failed") {
+    return {
+      kind: "authentication",
+      title: "Sign-in failed",
+      detail: "Complete sign-in in Grok Build using an advertised method. This app never reads credential files.",
+    };
+  }
+  if (launch.kind === "missing" || launch.kind === "invalid") {
+    return {
+      kind: "setup",
+      title: "Grok Build is not ready",
+      detail: launch.detail,
+    };
+  }
+  if (launch.kind === "failed" || launch.kind === "disconnected") {
+    return {
+      kind: "transient",
+      title: "Runtime needs recovery",
+      detail: "Reconnect restarts the existing contained Grok process. It does not spawn a second child or reuse stale events.",
+    };
+  }
+  if (input.sessionFailure !== null) {
+    return {
+      kind: "stale_session",
+      title: "Session needs attention",
+      detail: "Refresh the session list or start a new session in this workspace. Session files are never read by the GUI.",
+    };
+  }
+  if (input.workspaceFailure !== null) {
+    return {
+      kind: "stale_workspace",
+      title: "Workspace needs attention",
+      detail: "Choose another folder or remove the unavailable recent entry. Paths are validated before use.",
+    };
+  }
+  return null;
+}
+
 export function describeWorkspaceList(workspaces: RecentWorkspace[]) {
   const availableCount = workspaces.filter((workspace) => workspace.available).length;
   const staleCount = workspaces.length - availableCount;

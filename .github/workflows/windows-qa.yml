@@ -27,6 +27,15 @@ jobs:
       - run: cargo fmt --all --check
       - run: cargo test --workspace --locked --no-fail-fast
       - run: npm run tauri build -- --debug --bundles nsis
+      - name: Confirm the NSIS artifact exists and is not a Grok binary
+        shell: pwsh
+        run: |
+          $installer = Get-ChildItem -Path target/debug/bundle/nsis/*.exe | Select-Object -First 1
+          if (-not $installer) { throw "NSIS installer was not produced" }
+          if ($installer.Name -eq 'grok.exe') { throw "Installer must not be the Grok executable" }
+          if ($installer.Name -notmatch 'setup') { throw "Expected an NSIS setup artifact, got $($installer.Name)" }
+          $bundledGrok = Get-ChildItem -Path target/debug/bundle -Recurse -Filter grok.exe -ErrorAction SilentlyContinue
+          if ($bundledGrok) { throw "Grok binary must not be bundled" }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: windows-qa-installer

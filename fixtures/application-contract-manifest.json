@@ -25,7 +25,9 @@
     "session_set_model",
     "session_set_config",
     "permission_respond",
-    "elicitation_respond"
+    "elicitation_respond",
+    "presentation_get",
+    "presentation_set"
   ],
   "dtoFields": {
     "applicationEventEnvelope": ["event", "generation", "sequence"],
@@ -72,6 +74,15 @@
     "setSessionConfigRequest": ["configId", "sessionId", "value"],
     "permissionResponseRequest": ["decision", "interactionId"],
     "elicitationResponseRequest": ["decision", "interactionId"],
+    "presentationPreferences": [
+      "detailsOpen",
+      "detailsWidth",
+      "motion",
+      "onboarding",
+      "projectsOpen",
+      "projectsWidth",
+      "theme"
+    ],
     "setupStatus": ["executableSource", "executableState", "failure", "runtimeAvailable"],
     "acknowledgement": ["acknowledged"],
     "promptResult": ["stopReason"],
@@ -154,7 +165,10 @@
     "workspaceChangeKind": ["repository", "not_a_repository", "unavailable"],
     "workspaceChangeStatus": ["added", "modified", "deleted", "renamed", "copied", "unmerged", "untracked", "ignored", "other"],
     "workspaceChangeContent": ["text", "binary", "omitted", "unavailable"],
-    "runtimeProcessContainment": ["windows_job", "direct_child"]
+    "runtimeProcessContainment": ["windows_job", "direct_child"],
+    "presentationTheme": ["system", "light", "dark"],
+    "presentationMotion": ["system", "reduce"],
+    "onboardingStatus": ["unseen", "skipped", "completed"]
   },
   "events": {
     "runtime_state_changed": ["state"],
