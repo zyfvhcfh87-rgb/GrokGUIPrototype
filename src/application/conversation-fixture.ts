@@ -296,6 +296,36 @@ function dispatchFixtureCommand(input: {
       return { acknowledged: true };
     case "workspace_recent_remove":
       return { workspaces: [] };
+    case "workspace_changes":
+      return {
+        kind: "repository",
+        attributableToSession: false,
+        entries: [
+          {
+            path: "README.md",
+            previousPath: null,
+            status: "modified",
+            content: "text",
+            diff: "@@ -1 +1 @@\n-old\n+new",
+            truncated: false,
+          },
+        ],
+        truncated: false,
+        omittedEntryCount: 0,
+        omittedLineCount: 0,
+      };
+    case "runtime_diagnostics":
+      return {
+        state: "ready",
+        workerRunning: true,
+        consecutiveFailures: 0,
+        lastFailure: null,
+        stderrLines: 0,
+        stderrBytes: 0,
+        stderrTruncatedLines: 0,
+        stderrReadErrors: 0,
+        processContainment: "direct_child",
+      };
     default:
       throw {
         code: "invalid_request",

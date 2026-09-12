@@ -1005,7 +1005,11 @@ fn prompt_text(frame: &Value) -> String {
 
 fn plan_review_action(frame: &Value) -> Option<&'static str> {
     let text = prompt_text(frame);
-    let command = text.trim().trim_start_matches('/').split_whitespace().next()?;
+    let command = text
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()?;
     match command {
         "approve_plan" | "approve-plan" | "plan_approve" | "plan-approve" => Some("approve"),
         "revise_plan" | "revise-plan" | "plan_revise" | "plan-revise" => Some("revise"),
@@ -1041,7 +1045,10 @@ fn run_plan_review_prompt(
             ]
         })),
     )?;
-    write_frame(output, session_update(agent_message(message, "message-plan-review-001")))?;
+    write_frame(
+        output,
+        session_update(agent_message(message, "message-plan-review-001")),
+    )?;
     write_frame(
         output,
         result_response(prompt_id, json!({ "stopReason": "end_turn" })),

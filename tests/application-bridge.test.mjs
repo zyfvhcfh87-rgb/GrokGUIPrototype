@@ -23,6 +23,8 @@ test("typed bridge maps intents to exact narrow commands and one event channel",
   await bridge.listRecentWorkspaces();
   await bridge.validateWorkspace({ path: "C:\\workspace" });
   await bridge.removeRecentWorkspace({ path: "C:\\old" });
+  await bridge.inspectWorkspaceChanges({ path: "C:\\workspace" });
+  await bridge.runtimeDiagnostics();
   await bridge.newSession({ workspace: "C:\\workspace" });
   await bridge.sendPrompt({ sessionId: "session-1", text: "hello" });
   await bridge.openExternalUrl({ url: "https://example.com/docs" });
@@ -54,6 +56,14 @@ test("typed bridge maps intents to exact narrow commands and one event channel",
     {
       command: "workspace_recent_remove",
       args: { request: { path: "C:\\old" } },
+    },
+    {
+      command: "workspace_changes",
+      args: { request: { path: "C:\\workspace" } },
+    },
+    {
+      command: "runtime_diagnostics",
+      args: undefined,
     },
     {
       command: "session_new",

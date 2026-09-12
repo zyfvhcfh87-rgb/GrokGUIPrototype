@@ -179,6 +179,8 @@ export function describeSessionStatus(status: SessionRowStatus | SessionState): 
       return "Needs input";
     case "cancelling":
       return "Cancelling";
+    case "cancelled":
+      return "Cancelled";
     case "completed":
       return "Completed";
     case "closed":

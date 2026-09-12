@@ -1,3 +1,5 @@
+import type { ReactNode } from "react";
+
 import type { ConfigOption, ConfigValue } from "../application/contract.ts";
 import type { ConversationPresentation } from "../application/conversation.ts";
 import { describeActivityStatus, describeToolKind } from "../application/conversation.ts";
@@ -12,6 +14,7 @@ export function ActivityPane({
   onInsertCommand,
   onApprovePlan,
   onRevisePlan,
+  health,
 }: {
   presentation: ConversationPresentation;
   controlBusy: boolean;
@@ -22,6 +25,7 @@ export function ActivityPane({
   onInsertCommand: (name: string, acceptsInput: boolean) => void;
   onApprovePlan: () => void;
   onRevisePlan: () => void;
+  health?: ReactNode;
 }) {
   const { controls, activity } = presentation;
   const usage = activity.usage;
@@ -198,6 +202,7 @@ export function ActivityPane({
           ))}
         </ul>
       ) : null}
+      {health}
     </aside>
   );
 }

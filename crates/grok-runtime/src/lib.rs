@@ -42,9 +42,9 @@ pub use runtime::{
     AuthenticationMethod, ElicitationDecision, ElicitationValue, GrokRuntime, PermissionDecision,
     RuntimeAgent, RuntimeAgentProduct, RuntimeCapabilities, RuntimeCommand, RuntimeConfigChoice,
     RuntimeConfigKind, RuntimeConfigOption, RuntimeConfigValue, RuntimeError, RuntimeErrorCode,
-    RuntimeMode, RuntimeModes, RuntimePromptStopReason, RuntimeResponse, RuntimeSession,
-    RuntimeSessionCapabilities, RuntimeSessionControls, RuntimeSessionPage, RuntimeSessionSummary,
-    RuntimeSnapshot,
+    RuntimeHealth, RuntimeMode, RuntimeModes, RuntimeProcessContainment, RuntimePromptStopReason,
+    RuntimeResponse, RuntimeSession, RuntimeSessionCapabilities, RuntimeSessionControls,
+    RuntimeSessionPage, RuntimeSessionSummary, RuntimeSnapshot,
 };
 #[cfg(windows)]
 pub use windows_process::{ProcessDiagnosticSnapshot, ProcessDiagnostics, WindowsAcpProcess};

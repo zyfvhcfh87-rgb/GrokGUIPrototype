@@ -174,6 +174,52 @@ async fn a_crashed_runtime_reports_failure_and_can_restart_cleanly() {
 }
 
 #[tokio::test]
+async fn crash_loops_keep_a_single_runtime_and_remain_recoverable() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).args(["crash"]),
+    );
+
+    for expected in 1_u32..=3 {
+        let error = runtime
+            .start()
+            .await
+            .expect_err("crash fixture should fail start");
+        assert!(error.recoverable);
+        let health = runtime.health();
+        assert!(
+            !health.worker_running,
+            "a failed start must not leave a worker"
+        );
+        assert_eq!(health.consecutive_failures, expected);
+        assert_eq!(health.state, RuntimeState::Failed);
+        assert!(health.last_error.is_some());
+    }
+
+    runtime
+        .stop()
+        .await
+        .expect("stop after a crash loop should be idempotent");
+    assert!(!runtime.health().worker_running);
+}
+
+#[tokio::test]
+async fn concurrent_start_reuses_one_worker() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    let first = runtime.start();
+    let second = runtime.start();
+    let (first, second) = tokio::join!(first, second);
+    let first = first.expect("first start should succeed");
+    let second = second.expect("second start should reuse the worker");
+    assert_eq!(first.state, RuntimeState::Ready);
+    assert_eq!(second.state, RuntimeState::Ready);
+    assert!(runtime.health().worker_running);
+    runtime.stop().await.expect("runtime should stop");
+    assert!(!runtime.health().worker_running);
+}
+
+#[tokio::test]
 async fn session_lifecycle_is_exposed_without_acp_method_names() {
     let runtime = GrokRuntime::for_test(
         RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
@@ -1149,9 +1195,9 @@ async fn advertised_plan_review_replaces_the_saved_plan() {
                 .expect("runtime event stream should stay open")
             {
                 RuntimeEvent::PlanChanged { entries, .. }
-                    if entries
-                        .first()
-                        .is_some_and(|entry| entry.status == grok_runtime::PlanEntryStatus::Completed) =>
+                    if entries.first().is_some_and(|entry| {
+                        entry.status == grok_runtime::PlanEntryStatus::Completed
+                    }) =>
                 {
                     saw_approved_plan = true;
                 }

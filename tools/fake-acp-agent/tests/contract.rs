@@ -363,6 +363,11 @@ async fn lifecycle_streams_prompt_updates_and_honors_callback_responses() {
         message["params"]["update"]["sessionUpdate"],
         "agent_message_chunk"
     );
+    let commands = agent.receive().await;
+    assert_eq!(
+        commands["params"]["update"]["sessionUpdate"],
+        "available_commands_update"
+    );
     let plan = agent.receive().await;
     assert_eq!(plan["params"]["update"]["sessionUpdate"], "plan");
     assert_eq!(
