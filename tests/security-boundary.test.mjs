@@ -95,6 +95,8 @@ test("the desktop bridge exposes only reviewed application commands and events",
     "session_set_config",
     "permission_respond",
     "elicitation_respond",
+    "presentation_get",
+    "presentation_set",
   ]) {
     assert.match(bridge, new RegExp(`(?:async )?fn ${command}\\b`, "u"));
   }
@@ -105,6 +107,8 @@ test("the desktop bridge exposes only reviewed application commands and events",
   assert.match(bridge, /\.invoke_handler\(tauri::generate_handler!/u);
   assert.match(bridge, /emit\(APPLICATION_EVENT_NAME, envelope\)/u);
   assert.match(bridge, /RecvError::Lagged/u);
+  assert.match(bridge, /RunEvent::Exit/u);
+  assert.match(bridge, /stop_contained_runtime/u);
   assert.doesNotMatch(bridge, /async fn runtime_execute\b/u);
   assert.doesNotMatch(contract, /pub (?:enum|struct) (?:RuntimeCommand|RuntimeResponse)/u);
   assert.doesNotMatch(bridge, /session\/(?:new|list|load|resume|prompt|cancel|close|set_)/u);

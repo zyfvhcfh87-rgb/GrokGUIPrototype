@@ -8,6 +8,7 @@ import {
   type NewSessionRequest,
   type OpenExternalUrlRequest,
   type PermissionResponseRequest,
+  type PresentationPreferences,
   type PromptRequest,
   type PromptResult,
   type RecentWorkspaceList,
@@ -104,6 +105,15 @@ export function createApplicationBridge(transport: ApplicationTransport) {
     respondToElicitation: (request: ElicitationResponseRequest) =>
       invoke<Acknowledgement, ElicitationResponseRequest>(
         APPLICATION_COMMANDS.respondToElicitation,
+        request,
+      ),
+    getPresentationPreferences: () =>
+      transport.invoke<PresentationPreferences>(
+        APPLICATION_COMMANDS.getPresentationPreferences,
+      ),
+    setPresentationPreferences: (request: PresentationPreferences) =>
+      invoke<PresentationPreferences, PresentationPreferences>(
+        APPLICATION_COMMANDS.setPresentationPreferences,
         request,
       ),
     onEvent: (listener: (event: ApplicationEventEnvelope) => void) =>

@@ -1,19 +1,27 @@
 mod application_contract;
+mod presentation;
 mod workspace;
 mod workspace_changes;
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::PathBuf,
+    sync::{
+        Arc,
+        atomic::{AtomicBool, Ordering},
+    },
+    time::Duration,
+};
 
 use application_contract::{
     APPLICATION_EVENT_NAME, AcknowledgementDto, ApplicationErrorDto, ApplicationEvent,
     ApplicationEventClock, ElicitationResponseRequestDto, ExecutableSourceDto, ExecutableStateDto,
     InteractionKindDto, ListSessionsRequestDto, NewSessionRequestDto, OpenExternalUrlRequestDto,
-    PermissionResponseRequestDto, PromptRequestDto, PromptResultDto, RecentWorkspaceListDto,
-    RuntimeDiagnosticsDto, RuntimeSnapshotDto, SessionDto, SessionPageDto, SessionRequestDto,
-    SessionWorkspaceRequestDto, SetSessionConfigRequestDto, SetSessionModeRequestDto,
-    SetSessionModelRequestDto, SetupStatusDto, WorkspaceDto, WorkspaceRequestDto,
-    acknowledgement_from_response, prompt_from_response, session_from_response,
-    sessions_from_response,
+    PermissionResponseRequestDto, PresentationPreferencesDto, PromptRequestDto, PromptResultDto,
+    RecentWorkspaceListDto, RuntimeDiagnosticsDto, RuntimeSnapshotDto, SessionDto, SessionPageDto,
+    SessionRequestDto, SessionWorkspaceRequestDto, SetSessionConfigRequestDto,
+    SetSessionModeRequestDto, SetSessionModelRequestDto, SetupStatusDto, WorkspaceDto,
+    WorkspaceRequestDto, acknowledgement_from_response, prompt_from_response,
+    session_from_response, sessions_from_response,
 };
 use grok_runtime::{
     GrokRuntime, RedactedDiagnostic, ResolveGrokExecutableError, RuntimeCommand, RuntimeError,
@@ -21,7 +29,10 @@ use grok_runtime::{
 };
 use tauri::{Emitter as _, Manager as _};
 
+use crate::presentation::PresentationStore;
 use crate::workspace::WorkspaceStore;
+
+const CONTAINED_RUNTIME_STOP_BUDGET: Duration = Duration::from_secs(3);
 
 struct RuntimeManager {
     runtime: Result<GrokRuntime, RuntimeError>,
@@ -29,6 +40,7 @@ struct RuntimeManager {
     executable_source: Option<ExecutableSourceDto>,
     event_clock: Arc<ApplicationEventClock>,
     lifecycle: tokio::sync::Mutex<()>,
+    stopped: AtomicBool,
 }
 
 impl RuntimeManager {
@@ -56,6 +68,7 @@ impl RuntimeManager {
             executable_source,
             event_clock: Arc::new(ApplicationEventClock::default()),
             lifecycle: tokio::sync::Mutex::new(()),
+            stopped: AtomicBool::new(false),
         }
     }
 
@@ -147,6 +160,49 @@ impl WorkspaceManager {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .forget_session(session_id);
     }
+}
+
+struct PresentationManager {
+    store: std::sync::Mutex<PresentationStore>,
+}
+
+impl PresentationManager {
+    fn new(storage_path: PathBuf) -> Self {
+        Self {
+            store: std::sync::Mutex::new(PresentationStore::open(storage_path)),
+        }
+    }
+
+    fn get(&self) -> Result<PresentationPreferencesDto, ApplicationErrorDto> {
+        self.store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get()
+            .map_err(ApplicationErrorDto::from)
+    }
+
+    fn set(
+        &self,
+        preferences: PresentationPreferencesDto,
+    ) -> Result<PresentationPreferencesDto, ApplicationErrorDto> {
+        self.store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .set(preferences)
+            .map_err(ApplicationErrorDto::from)
+    }
+}
+
+async fn stop_contained_runtime(manager: &RuntimeManager) {
+    if manager.stopped.swap(true, Ordering::SeqCst) {
+        return;
+    }
+    // Do not wait on `lifecycle`. `runtime_start` holds that lock until
+    // initialize and sign-in finish, which would freeze Close on the UI thread.
+    let Ok(runtime) = manager.runtime() else {
+        return;
+    };
+    let _ = tokio::time::timeout(CONTAINED_RUNTIME_STOP_BUDGET, runtime.stop()).await;
 }
 
 fn emit_application_event(
@@ -542,6 +598,21 @@ async fn elicitation_respond(
     Ok(AcknowledgementDto::accepted())
 }
 
+#[tauri::command]
+fn presentation_get(
+    manager: tauri::State<'_, PresentationManager>,
+) -> Result<PresentationPreferencesDto, ApplicationErrorDto> {
+    manager.get()
+}
+
+#[tauri::command]
+fn presentation_set(
+    manager: tauri::State<'_, PresentationManager>,
+    request: PresentationPreferencesDto,
+) -> Result<PresentationPreferencesDto, ApplicationErrorDto> {
+    manager.set(request)
+}
+
 pub fn run() {
     let manager = RuntimeManager::discover();
     let event_source = manager.runtime.as_ref().ok().cloned();
@@ -550,8 +621,13 @@ pub fn run() {
     tauri::Builder::default()
         .manage(manager)
         .setup(move |app| {
-            let preferences_path = app.path().app_config_dir()?.join("recent-workspaces.json");
-            app.manage(WorkspaceManager::new(preferences_path));
+            let config_dir = app.path().app_config_dir()?;
+            app.manage(WorkspaceManager::new(
+                config_dir.join("recent-workspaces.json"),
+            ));
+            app.manage(PresentationManager::new(
+                config_dir.join("presentation.json"),
+            ));
             if let Some(runtime) = event_source {
                 let mut events = runtime.subscribe();
                 let app_handle = app.handle().clone();
@@ -605,7 +681,19 @@ pub fn run() {
             session_set_config,
             permission_respond,
             elicitation_respond,
+            presentation_get,
+            presentation_set,
         ])
-        .run(tauri::generate_context!())
-        .expect("failed to run the Grok Build GUI desktop shell");
+        .build(tauri::generate_context!())
+        .expect("failed to build the Grok Build GUI desktop shell")
+        .run(|app_handle, event| {
+            if matches!(
+                event,
+                tauri::RunEvent::Exit | tauri::RunEvent::ExitRequested { .. }
+            ) {
+                if let Some(manager) = app_handle.try_state::<RuntimeManager>() {
+                    tauri::async_runtime::block_on(stop_contained_runtime(&manager));
+                }
+            }
+        });
 }

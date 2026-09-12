@@ -115,6 +115,37 @@ async fn stop_is_bounded_when_the_child_lingers_after_protocol_eof() {
 }
 
 #[tokio::test]
+async fn stop_during_hung_initialize_does_not_wait_for_ready() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "hang-initialize"])
+            .auth_method("fixture_auth")
+            .request_timeout(Duration::from_secs(30)),
+    );
+    let mut events = runtime.subscribe();
+    let starting = {
+        let runtime = runtime.clone();
+        tokio::spawn(async move { runtime.start().await })
+    };
+    wait_for_runtime_state(&mut events, RuntimeState::Connecting).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    tokio::time::timeout(Duration::from_secs(3), runtime.stop())
+        .await
+        .expect("stop during hung initialize must remain bounded")
+        .expect("runtime should stop");
+    let start_result = tokio::time::timeout(Duration::from_secs(3), starting)
+        .await
+        .expect("start should unwind after stop")
+        .expect("start task should join");
+    assert!(
+        start_result.is_err(),
+        "stop must interrupt initialize instead of letting it finish"
+    );
+    assert!(!runtime.health().worker_running);
+    assert_eq!(runtime.snapshot().state, RuntimeState::Disconnected);
+}
+
+#[tokio::test]
 async fn a_crashed_runtime_reports_failure_and_can_restart_cleanly() {
     let temporary_directory = tempfile::tempdir().expect("temporary directory");
     let state_file = temporary_directory.path().join("persisted-session.state");

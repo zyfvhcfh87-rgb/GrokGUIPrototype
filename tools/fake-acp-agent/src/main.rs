@@ -79,6 +79,7 @@ enum LifecycleFault {
     CrashPrompt,
     HangClose,
     HangPrompt,
+    HangInitialize,
     ListError,
     LoadError,
     ResumeError,
@@ -376,6 +377,9 @@ fn run_lifecycle(
 
         match method {
             "initialize" => {
+                if lifecycle_fault == Some(LifecycleFault::HangInitialize) {
+                    continue;
+                }
                 state.initialized = true;
                 write_frame(&mut output, initialize_response(id))?;
             }

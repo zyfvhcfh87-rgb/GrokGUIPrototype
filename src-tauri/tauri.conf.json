@@ -57,14 +57,33 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "createUpdaterArtifacts": false,
+    "publisher": "Grok Build GUI",
+    "category": "DeveloperTool",
+    "shortDescription": "Local-first desktop cockpit for Grok Build",
+    "longDescription": "A local-first cockpit for the installed Grok Build agent. It does not bundle Grok, credentials, updaters, or session files.",
+    "copyright": "Copyright 2026",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "resources": [],
+    "externalBin": [],
+    "windows": {
+      "certificateThumbprint": null,
+      "digestAlgorithm": "sha256",
+      "timestampUrl": "",
+      "tsp": false,
+      "nsis": {
+        "installMode": "currentUser",
+        "displayLanguageSelector": false,
+        "startMenuFolder": "Grok Build GUI"
+      }
+    }
   },
   "plugins": {}
 }

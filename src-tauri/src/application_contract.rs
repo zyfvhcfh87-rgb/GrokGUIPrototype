@@ -43,6 +43,8 @@ pub const APPLICATION_COMMAND_NAMES: &[&str] = &[
     "session_set_config",
     "permission_respond",
     "elicitation_respond",
+    "presentation_get",
+    "presentation_set",
 ];
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -61,6 +63,41 @@ impl OpenExternalUrlRequestDto {
     pub fn validated_url(self) -> Result<String, ApplicationErrorDto> {
         validate_external_url(&self.url)
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationThemeDto {
+    System,
+    Light,
+    Dark,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PresentationMotionDto {
+    System,
+    Reduce,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum OnboardingStatusDto {
+    Unseen,
+    Skipped,
+    Completed,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PresentationPreferencesDto {
+    pub theme: PresentationThemeDto,
+    pub motion: PresentationMotionDto,
+    pub projects_open: bool,
+    pub details_open: bool,
+    pub projects_width: u16,
+    pub details_width: u16,
+    pub onboarding: OnboardingStatusDto,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -1172,6 +1209,14 @@ impl ApplicationErrorDto {
             code: ApplicationErrorCodeDto::BoundaryViolation,
             diagnostic: "application event delivery did not reach a consistent checkpoint"
                 .to_owned(),
+            recoverable: true,
+        }
+    }
+
+    pub(crate) fn appearance_preferences_unavailable(diagnostic: &'static str) -> Self {
+        Self {
+            code: ApplicationErrorCodeDto::PreferencesUnavailable,
+            diagnostic: diagnostic.to_owned(),
             recoverable: true,
         }
     }
@@ -2870,7 +2915,20 @@ mod tests {
                 "processContainment": "direct_child"
             })
         );
-        assert_eq!(dto_fields.len(), 42, "every reviewed DTO needs a fixture");
+        assert_fields!(
+            "presentationPreferences",
+            PresentationPreferencesDto,
+            json!({
+                "theme": "system",
+                "motion": "system",
+                "projectsOpen": true,
+                "detailsOpen": true,
+                "projectsWidth": 260,
+                "detailsWidth": 280,
+                "onboarding": "unseen"
+            })
+        );
+        assert_eq!(dto_fields.len(), 43, "every reviewed DTO needs a fixture");
 
         assert_values!(
             "runtimeState",
@@ -3071,7 +3129,27 @@ mod tests {
                 RuntimeProcessContainmentDto::DirectChild
             ]
         );
-        assert_eq!(enum_values.len(), 19, "every reviewed enum needs a fixture");
+        assert_values!(
+            "presentationTheme",
+            [
+                PresentationThemeDto::System,
+                PresentationThemeDto::Light,
+                PresentationThemeDto::Dark
+            ]
+        );
+        assert_values!(
+            "presentationMotion",
+            [PresentationMotionDto::System, PresentationMotionDto::Reduce]
+        );
+        assert_values!(
+            "onboardingStatus",
+            [
+                OnboardingStatusDto::Unseen,
+                OnboardingStatusDto::Skipped,
+                OnboardingStatusDto::Completed
+            ]
+        );
+        assert_eq!(enum_values.len(), 22, "every reviewed enum needs a fixture");
 
         assert_variant_fields!(
             "permissionScope",

@@ -44,7 +44,7 @@ const permission = {
 
 test("permission component displays exact escaped scope and only advertised approval options", { skip: unavailable }, () => {
   const html = render(permission);
-  for (const text of ["Working directory", "/workspace/out.txt", "/workspace/other.txt", "Overwrites the output file.", "Allow once", "Always allow", "Deny once"]) assert.ok(html.includes(text));
+  for (const text of ["Working directory", "/workspace/out.txt", "/workspace/other.txt", "Overwrites the output file.", "Allow once", "Always allow", "Deny once", "Destructive action"]) assert.ok(html.includes(text));
   assert.ok(html.includes("&lt;unsafe&gt;")); assert.ok(!html.includes("<unsafe>"));
   assert.ok(!html.includes("Always deny"));
   assert.ok(html.indexOf(">Deny once<") < html.indexOf(">Allow once<"));

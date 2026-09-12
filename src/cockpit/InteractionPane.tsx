@@ -1,6 +1,6 @@
 import { useId, useState } from "react";
 import type { InteractionController, InteractionStatus } from "../application/interaction-controller.ts";
-import { elicitationAnswer, pendingInteractions, permissionActions, responseKey, validElicitationControl, validPermissionScope, type FormInput, type Interaction, type InteractionContext } from "../application/interactions.ts";
+import { elicitationAnswer, pendingInteractions, permissionActions, permissionConsequenceTone, responseKey, validElicitationControl, validPermissionScope, type FormInput, type Interaction, type InteractionContext } from "../application/interactions.ts";
 
 export function InteractionPane({ context, controller, statuses }: {
   context: InteractionContext;
@@ -26,9 +26,13 @@ function InteractionCard({ target, controller, status }: {
   const scope = request.scope;
   const valid = validPermissionScope(scope);
   const actions = permissionActions(request);
+  const tone = permissionConsequenceTone(request);
   return (
     <article className="stream-card interaction-card" aria-labelledby={labelId} aria-busy={status?.phase === "sending"}>
       <h2 id={labelId}>{request.title}</h2>
+      <p className={`interaction-tone interaction-tone--${tone}`}>
+        {tone === "destructive" ? "Destructive action. Review the exact command and paths before allowing it." : "Review required. Approval is never implied by color."}
+      </p>
       <p>Review what this action can do before allowing it.</p>
       {valid && scope.type === "command" ? <dl className="interaction-scope">
         <dt>Command</dt><dd><pre>{scope.command}</pre></dd>
