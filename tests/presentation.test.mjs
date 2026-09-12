@@ -69,3 +69,61 @@ test("light theme CSS is flattened so body and chrome update without nesting", a
   assert.match(css, /html\[data-theme="light"\] \.titlebar/u);
   assert.doesNotMatch(css, /html\[data-theme="light"\] \{[\s\S]{0,80}body \{/u);
 });
+
+test("queued presentation writes merge against the latest saved state", async () => {
+  let stored = { ...DEFAULT_PRESENTATION_PREFERENCES };
+  let releaseFirst;
+  const firstGate = new Promise((resolve) => {
+    releaseFirst = resolve;
+  });
+  let writes = 0;
+  const controller = createPresentationController({
+    getPresentationPreferences: async () => stored,
+    setPresentationPreferences: async (request) => {
+      writes += 1;
+      if (writes === 1) {
+        await firstGate;
+      }
+      stored = { ...request };
+      return stored;
+    },
+  });
+  await controller.initialize();
+  const first = controller.update({ projectsOpen: false });
+  const second = controller.update({ detailsOpen: false });
+  releaseFirst();
+  await Promise.all([first, second]);
+  assert.equal(controller.getState().preferences.projectsOpen, false);
+  assert.equal(controller.getState().preferences.detailsOpen, false);
+  assert.equal(stored.projectsOpen, false);
+  assert.equal(stored.detailsOpen, false);
+});
+
+test("queued toggles apply against the latest controller state", async () => {
+  let stored = { ...DEFAULT_PRESENTATION_PREFERENCES };
+  const controller = createPresentationController({
+    getPresentationPreferences: async () => stored,
+    setPresentationPreferences: async (request) => {
+      stored = { ...request };
+      return stored;
+    },
+  });
+  await controller.initialize();
+  await Promise.all([
+    controller.update((current) => ({ projectsOpen: !current.projectsOpen })),
+    controller.update((current) => ({ projectsOpen: !current.projectsOpen })),
+  ]);
+  assert.equal(controller.getState().preferences.projectsOpen, true);
+});
+
+test("app presentation writes are patches instead of full snapshots", async () => {
+  const source = await readFile(new URL("../src/App.tsx", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /presentation\.update\(\{ \.\.\.prefs/u);
+  assert.match(source, /presentation\.update\(\(current\) => \(\{ projectsOpen: !current\.projectsOpen \}\)\)/u);
+});
+
+test("dialog focus trap is mounted once so live updates do not steal focus", async () => {
+  const source = await readFile(new URL("../src/cockpit/Dialog.tsx", import.meta.url), "utf8");
+  assert.match(source, /onCloseRef\.current = onClose/u);
+  assert.doesNotMatch(source, /}, \[onClose\]\);/u);
+});

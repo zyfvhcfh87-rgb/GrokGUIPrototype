@@ -32,6 +32,8 @@ use tauri::{Emitter as _, Manager as _};
 use crate::presentation::PresentationStore;
 use crate::workspace::WorkspaceStore;
 
+const CONTAINED_RUNTIME_STOP_BUDGET: Duration = Duration::from_secs(3);
+
 struct RuntimeManager {
     runtime: Result<GrokRuntime, RuntimeError>,
     executable_state: ExecutableStateDto,
@@ -195,10 +197,12 @@ async fn stop_contained_runtime(manager: &RuntimeManager) {
     if manager.stopped.swap(true, Ordering::SeqCst) {
         return;
     }
-    let _lifecycle = manager.lifecycle.lock().await;
-    if let Ok(runtime) = manager.runtime() {
-        let _ = runtime.stop().await;
-    }
+    // Do not wait on `lifecycle`. `runtime_start` holds that lock until
+    // initialize and sign-in finish, which would freeze Close on the UI thread.
+    let Ok(runtime) = manager.runtime() else {
+        return;
+    };
+    let _ = tokio::time::timeout(CONTAINED_RUNTIME_STOP_BUDGET, runtime.stop()).await;
 }
 
 fn emit_application_event(

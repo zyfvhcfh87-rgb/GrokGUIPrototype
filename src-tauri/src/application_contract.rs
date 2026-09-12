@@ -1212,6 +1212,14 @@ impl ApplicationErrorDto {
             recoverable: true,
         }
     }
+
+    pub(crate) fn appearance_preferences_unavailable(diagnostic: &'static str) -> Self {
+        Self {
+            code: ApplicationErrorCodeDto::PreferencesUnavailable,
+            diagnostic: diagnostic.to_owned(),
+            recoverable: true,
+        }
+    }
 }
 
 impl From<grok_runtime::RuntimeError> for ApplicationErrorDto {

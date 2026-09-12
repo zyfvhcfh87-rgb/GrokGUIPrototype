@@ -90,6 +90,7 @@ struct RuntimeShared {
     session_controls: StdMutex<HashMap<String, RuntimeSessionControls>>,
     session_workspaces: StdMutex<HashMap<String, PathBuf>>,
     worker_running: AtomicBool,
+    stop_epoch: AtomicU64,
     consecutive_failures: AtomicU32,
     last_error: StdMutex<Option<RuntimeError>>,
     #[cfg(windows)]
@@ -577,6 +578,7 @@ impl GrokRuntime {
                 session_controls: StdMutex::new(HashMap::new()),
                 session_workspaces: StdMutex::new(HashMap::new()),
                 worker_running: AtomicBool::new(false),
+                stop_epoch: AtomicU64::new(0),
                 consecutive_failures: AtomicU32::new(0),
                 last_error: StdMutex::new(None),
                 #[cfg(windows)]
@@ -621,7 +623,8 @@ impl GrokRuntime {
                 let _ = finished.task.await;
             }
         }
-        match self.start_inner().await {
+        let epoch = self.shared.stop_epoch.load(Ordering::SeqCst);
+        match self.start_inner(epoch).await {
             Ok(snapshot) => {
                 self.shared.clear_failures();
                 Ok(snapshot)
@@ -635,15 +638,20 @@ impl GrokRuntime {
     }
 
     pub async fn stop(&self) -> Result<(), RuntimeError> {
-        let _operation = self.operation.lock().await;
-        self.stop_inner().await;
+        self.shared.stop_epoch.fetch_add(1, Ordering::SeqCst);
+        self.shutdown_current_worker().await;
+        match tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, self.operation.lock()).await {
+            Ok(_operation) => self.stop_inner().await,
+            Err(_) => self.shutdown_current_worker().await,
+        }
         Ok(())
     }
 
     pub async fn restart(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         let _operation = self.operation.lock().await;
         self.stop_inner().await;
-        match self.start_inner().await {
+        let epoch = self.shared.stop_epoch.load(Ordering::SeqCst);
+        match self.start_inner(epoch).await {
             Ok(snapshot) => {
                 self.shared.clear_failures();
                 Ok(snapshot)
@@ -789,7 +797,10 @@ impl GrokRuntime {
         })
     }
 
-    async fn start_inner(&self) -> Result<RuntimeSnapshot, RuntimeError> {
+    async fn start_inner(&self, epoch: u64) -> Result<RuntimeSnapshot, RuntimeError> {
+        if self.shared.stop_epoch.load(Ordering::SeqCst) != epoch {
+            return Err(start_interrupted_error());
+        }
         self.shared.allow_runtime_interactions();
         self.shared.transition(RuntimeState::Connecting);
         let (commands, command_rx) = mpsc::channel(COMMAND_CHANNEL_CAPACITY);
@@ -801,6 +812,10 @@ impl GrokRuntime {
         });
         self.shared.worker_running.store(true, Ordering::Relaxed);
         *self.worker.lock().await = Some(RuntimeWorker { commands, task });
+        if self.shared.stop_epoch.load(Ordering::SeqCst) != epoch {
+            self.shutdown_current_worker().await;
+            return Err(start_interrupted_error());
+        }
         let result = match ready_rx.await {
             Ok(result) => result,
             Err(_) => Err(runtime_error(
@@ -827,7 +842,16 @@ impl GrokRuntime {
             self.shared.worker_running.store(false, Ordering::Relaxed);
             return;
         };
-        shutdown_worker(worker).await;
+        let state = self.snapshot().state;
+        if matches!(
+            state,
+            RuntimeState::Connecting | RuntimeState::Authenticating
+        ) {
+            worker.task.abort();
+            let _ = worker.task.await;
+        } else {
+            shutdown_worker(worker).await;
+        }
         self.shared.worker_running.store(false, Ordering::Relaxed);
     }
 }
@@ -3318,6 +3342,14 @@ fn safe_label(value: &str) -> Option<String> {
         && value.len() <= MAX_SAFE_LABEL_BYTES
         && !value.chars().any(char::is_control))
     .then(|| value.to_owned())
+}
+
+fn start_interrupted_error() -> RuntimeError {
+    runtime_error(
+        RuntimeErrorCode::RuntimeStopped,
+        "runtime stopped before initialization completed",
+        true,
+    )
 }
 
 fn runtime_error(

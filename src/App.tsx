@@ -246,16 +246,16 @@ export function App({
       switch (id) {
         case "toggle-projects":
           restoreFocusIfInside("workspace-panel", "toggle-projects");
-          void presentation.update({ ...prefs, projectsOpen: !prefs.projectsOpen });
+          void presentation.update((current) => ({ projectsOpen: !current.projectsOpen }));
           break;
         case "toggle-details":
           restoreFocusIfInside("details-panel", "toggle-details");
-          void presentation.update({ ...prefs, detailsOpen: !prefs.detailsOpen });
+          void presentation.update((current) => ({ detailsOpen: !current.detailsOpen }));
           break;
         case "focus-projects":
           pendingProjectsFocus.current = true;
           if (!prefs.projectsOpen) {
-            void presentation.update({ ...prefs, projectsOpen: true });
+            void presentation.update({ projectsOpen: true });
             break;
           }
           pendingProjectsFocus.current = false;
@@ -377,11 +377,11 @@ export function App({
         detailsOpen={prefs.detailsOpen}
         onToggleProjects={() => {
           restoreFocusIfInside("workspace-panel", "toggle-projects");
-          void presentation.update({ ...prefs, projectsOpen: !prefs.projectsOpen });
+          void presentation.update((current) => ({ projectsOpen: !current.projectsOpen }));
         }}
         onToggleDetails={() => {
           restoreFocusIfInside("details-panel", "toggle-details");
-          void presentation.update({ ...prefs, detailsOpen: !prefs.detailsOpen });
+          void presentation.update((current) => ({ detailsOpen: !current.detailsOpen }));
         }}
         onOpenAppearance={() => setOverlay("appearance")}
         onOpenShortcuts={() => setOverlay("shortcuts")}
@@ -431,7 +431,7 @@ export function App({
             label="Resize projects panel"
             cssVariable="--projects-width"
             value={prefs.projectsWidth}
-            onChange={(projectsWidth) => void presentation.update({ ...prefs, projectsWidth })}
+            onChange={(projectsWidth) => void presentation.update({ projectsWidth })}
           />
         ) : null}
 
@@ -548,7 +548,7 @@ export function App({
             cssVariable="--details-width"
             value={prefs.detailsWidth}
             invert
-            onChange={(detailsWidth) => void presentation.update({ ...prefs, detailsWidth })}
+            onChange={(detailsWidth) => void presentation.update({ detailsWidth })}
           />
         ) : null}
 
@@ -691,7 +691,7 @@ export function App({
       {overlay === "appearance" ? (
         <AppearanceDialog
           preferences={prefs}
-          onChange={(next) => void presentation.update(next)}
+          onChange={(patch) => void presentation.update(patch)}
           onClose={() => setOverlay(null)}
         />
       ) : null}

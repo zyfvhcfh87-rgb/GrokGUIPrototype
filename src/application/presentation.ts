@@ -106,6 +106,30 @@ export function applyDocumentAppearance(input: {
   root.style.colorScheme = input.theme;
 }
 
+export function mergePresentationPatch(
+  current: PresentationPreferences,
+  patch: Partial<PresentationPreferences>,
+): PresentationPreferences {
+  return sanitizePresentationPreferences({ ...current, ...patch });
+}
+
+export function presentationPreferencesEqual(
+  left: PresentationPreferences,
+  right: PresentationPreferences,
+): boolean {
+  return left.theme === right.theme
+    && left.motion === right.motion
+    && left.projectsOpen === right.projectsOpen
+    && left.detailsOpen === right.detailsOpen
+    && left.projectsWidth === right.projectsWidth
+    && left.detailsWidth === right.detailsWidth
+    && left.onboarding === right.onboarding;
+}
+
+export type PresentationPatchInput =
+  | Partial<PresentationPreferences>
+  | ((current: PresentationPreferences) => Partial<PresentationPreferences>);
+
 export function createPresentationController(bridge: PresentationBridge) {
   let state: PresentationState = {
     preferences: DEFAULT_PRESENTATION_PREFERENCES,
@@ -117,6 +141,7 @@ export function createPresentationController(bridge: PresentationBridge) {
   const listeners = new Set<(state: PresentationState) => void>();
   let themeMedia: MediaQueryList | undefined;
   let motionMedia: MediaQueryList | undefined;
+  let writeChain: Promise<void> = Promise.resolve();
   const refreshResolved = () => {
     apply(state.preferences, state.failure);
   };
@@ -152,6 +177,23 @@ export function createPresentationController(bridge: PresentationBridge) {
     }
   };
 
+  const persistPatch = (patch: PresentationPatchInput): Promise<PresentationPreferences> => {
+    const job = writeChain.then(async () => {
+      const current = state.preferences;
+      const resolved = typeof patch === "function" ? patch(current) : patch;
+      const next = mergePresentationPatch(current, resolved);
+      if (presentationPreferencesEqual(next, current) && state.loaded) {
+        return current;
+      }
+      return persist(next);
+    });
+    writeChain = job.then(
+      () => undefined,
+      () => undefined,
+    );
+    return job;
+  };
+
   return {
     getState: () => state,
     subscribe: (listener: (state: PresentationState) => void) => {
@@ -179,9 +221,8 @@ export function createPresentationController(bridge: PresentationBridge) {
       themeMedia?.addEventListener("change", refreshResolved);
       motionMedia?.addEventListener("change", refreshResolved);
     },
-    update: persist,
-    setOnboarding: (onboarding: OnboardingStatus) =>
-      persist({ ...state.preferences, onboarding }),
+    update: persistPatch,
+    setOnboarding: (onboarding: OnboardingStatus) => persistPatch({ onboarding }),
     dispose: () => {
       themeMedia?.removeEventListener("change", refreshResolved);
       motionMedia?.removeEventListener("change", refreshResolved);

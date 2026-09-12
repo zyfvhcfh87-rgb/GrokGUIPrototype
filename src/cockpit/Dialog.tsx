@@ -14,6 +14,8 @@ export function Dialog({
   const titleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     restoreRef.current = document.activeElement instanceof HTMLElement
@@ -27,7 +29,7 @@ export function Dialog({
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
       if (event.key !== "Tab" || root === null) {
@@ -54,7 +56,7 @@ export function Dialog({
       document.removeEventListener("keydown", onKeyDown, true);
       restoreRef.current?.focus();
     };
-  }, [onClose]);
+  }, []);
 
   const onBackdropMouseDown = (event: MouseEvent<HTMLDivElement>) => {
     if (event.target === event.currentTarget) {

@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::application_contract::{
-    OnboardingStatusDto, PresentationMotionDto, PresentationPreferencesDto, PresentationThemeDto,
+    ApplicationErrorDto, OnboardingStatusDto, PresentationMotionDto, PresentationPreferencesDto,
+    PresentationThemeDto,
 };
 
 const MAX_PREFERENCES_BYTES: u64 = 16 * 1_024;
@@ -12,6 +13,25 @@ const MIN_PANEL_WIDTH: u16 = 200;
 const MAX_PANEL_WIDTH: u16 = 420;
 const DEFAULT_PROJECTS_WIDTH: u16 = 260;
 const DEFAULT_DETAILS_WIDTH: u16 = 280;
+
+#[derive(Debug, Eq, PartialEq)]
+pub(crate) enum PresentationError {
+    LoadFailed,
+    SaveFailed,
+}
+
+impl From<PresentationError> for ApplicationErrorDto {
+    fn from(value: PresentationError) -> Self {
+        match value {
+            PresentationError::LoadFailed => Self::appearance_preferences_unavailable(
+                "appearance preferences could not be loaded",
+            ),
+            PresentationError::SaveFailed => Self::appearance_preferences_unavailable(
+                "appearance preferences could not be saved",
+            ),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub(crate) struct PresentationStore {
@@ -30,9 +50,9 @@ impl PresentationStore {
         }
     }
 
-    pub fn get(&self) -> Result<PresentationPreferencesDto, super::workspace::WorkspaceError> {
+    pub fn get(&self) -> Result<PresentationPreferencesDto, PresentationError> {
         if self.preference_error {
-            return Err(super::workspace::WorkspaceError::PreferencesUnavailable);
+            return Err(PresentationError::LoadFailed);
         }
         Ok(self.preferences.clone())
     }
@@ -40,12 +60,12 @@ impl PresentationStore {
     pub fn set(
         &mut self,
         preferences: PresentationPreferencesDto,
-    ) -> Result<PresentationPreferencesDto, super::workspace::WorkspaceError> {
+    ) -> Result<PresentationPreferencesDto, PresentationError> {
         let sanitized = sanitize(preferences);
         self.preferences = sanitized.clone();
         self.preference_error = persist(&self.storage_path, &sanitized).is_err();
         if self.preference_error {
-            return Err(super::workspace::WorkspaceError::PreferencesUnavailable);
+            return Err(PresentationError::SaveFailed);
         }
         Ok(sanitized)
     }
@@ -112,22 +132,18 @@ fn load(storage_path: &Path) -> (PresentationPreferencesDto, bool) {
 fn persist(
     storage_path: &Path,
     preferences: &PresentationPreferencesDto,
-) -> Result<(), super::workspace::WorkspaceError> {
-    let parent = storage_path
-        .parent()
-        .ok_or(super::workspace::WorkspaceError::PreferencesUnavailable)?;
-    std::fs::create_dir_all(parent)
-        .map_err(|_| super::workspace::WorkspaceError::PreferencesUnavailable)?;
+) -> Result<(), PresentationError> {
+    let parent = storage_path.parent().ok_or(PresentationError::SaveFailed)?;
+    std::fs::create_dir_all(parent).map_err(|_| PresentationError::SaveFailed)?;
     let contents = serde_json::to_vec(&StoredPresentation {
         version: PREFERENCES_VERSION,
         preferences: sanitize(preferences.clone()),
     })
-    .map_err(|_| super::workspace::WorkspaceError::PreferencesUnavailable)?;
+    .map_err(|_| PresentationError::SaveFailed)?;
     if contents.len() as u64 > MAX_PREFERENCES_BYTES {
-        return Err(super::workspace::WorkspaceError::PreferencesUnavailable);
+        return Err(PresentationError::SaveFailed);
     }
-    std::fs::write(storage_path, contents)
-        .map_err(|_| super::workspace::WorkspaceError::PreferencesUnavailable)
+    std::fs::write(storage_path, contents).map_err(|_| PresentationError::SaveFailed)
 }
 
 #[cfg(test)]
@@ -221,5 +237,21 @@ mod tests {
             .expect("reopen");
         assert_eq!(reopened.onboarding, OnboardingStatusDto::Unseen);
         assert_eq!(reopened.theme, PresentationThemeDto::Dark);
+    }
+
+    #[test]
+    fn presentation_errors_do_not_mention_workspaces() {
+        let loaded = ApplicationErrorDto::from(PresentationError::LoadFailed);
+        let saved = ApplicationErrorDto::from(PresentationError::SaveFailed);
+        assert_eq!(
+            loaded.diagnostic,
+            "appearance preferences could not be loaded"
+        );
+        assert_eq!(
+            saved.diagnostic,
+            "appearance preferences could not be saved"
+        );
+        assert!(!loaded.diagnostic.contains("workspace"));
+        assert!(!saved.diagnostic.contains("workspace"));
     }
 }

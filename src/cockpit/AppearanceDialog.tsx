@@ -8,7 +8,7 @@ export function AppearanceDialog({
   onClose,
 }: {
   preferences: PresentationPreferences;
-  onChange: (preferences: PresentationPreferences) => void;
+  onChange: (patch: Partial<PresentationPreferences>) => void;
   onClose: () => void;
 }) {
   return (
@@ -21,7 +21,7 @@ export function AppearanceDialog({
               type="radio"
               name="theme"
               checked={preferences.theme === theme}
-              onChange={() => onChange({ ...preferences, theme })}
+              onChange={() => onChange({ theme })}
             />
             {themeLabel(theme)}
           </label>
@@ -35,7 +35,7 @@ export function AppearanceDialog({
               type="radio"
               name="motion"
               checked={preferences.motion === motion}
-              onChange={() => onChange({ ...preferences, motion })}
+              onChange={() => onChange({ motion })}
             />
             {motionLabel(motion)}
           </label>
