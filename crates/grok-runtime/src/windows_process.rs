@@ -117,6 +117,13 @@ impl WindowsAcpProcess {
         self.diagnostics.clone()
     }
 
+    /// Replace the stderr counter handle so the runtime can snapshot it.
+    #[must_use]
+    pub fn share_diagnostics(mut self, diagnostics: ProcessDiagnostics) -> Self {
+        self.diagnostics = diagnostics;
+        self
+    }
+
     /// Observe sanitized ACP frame shapes and diagnostic byte counts.
     #[must_use]
     pub fn wire_capture(mut self, capture: WireCapture) -> Self {

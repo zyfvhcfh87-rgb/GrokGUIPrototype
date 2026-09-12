@@ -11,6 +11,8 @@ use clap::{Parser, ValueEnum};
 use serde_json::{Value, json};
 
 const SESSION_ID: &str = "session-001";
+const SESSION_ID_PAGE_TWO: &str = "session-002";
+const PAGE_TWO_CURSOR: &str = "fixture-page-2";
 const FIXTURE_CWD: &str = r"C:\fixture-workspace";
 const SENTINEL_READY_FILE: &str = "sentinel.ready";
 const SENTINEL_HEARTBEAT_FILE: &str = "sentinel.heartbeat";
@@ -45,6 +47,9 @@ struct Args {
 
     #[arg(long, value_name = "PATH")]
     close_marker: Option<PathBuf>,
+
+    #[arg(long)]
+    paginate_sessions: bool,
 }
 
 #[derive(Clone, Copy, Debug, ValueEnum)]
@@ -71,6 +76,7 @@ enum LifecycleFault {
     PromptError,
     CancelError,
     CloseError,
+    CrashPrompt,
     HangClose,
     HangPrompt,
     ListError,
@@ -89,6 +95,7 @@ async fn main() {
             args.recovery_fault,
             args.lifecycle_fault,
             args.close_marker.as_deref(),
+            args.paginate_sessions,
         ),
         Scenario::Malformed => run_malformed(),
         Scenario::Stderr => run_lifecycle(
@@ -98,6 +105,7 @@ async fn main() {
             args.recovery_fault,
             args.lifecycle_fault,
             args.close_marker.as_deref(),
+            args.paginate_sessions,
         ),
         Scenario::Crash => run_crash(),
         Scenario::CrashAfterNew => required_path(args.state_file.as_deref(), "--state-file")
@@ -109,6 +117,7 @@ async fn main() {
                     args.recovery_fault,
                     args.lifecycle_fault,
                     args.close_marker.as_deref(),
+                    args.paginate_sessions,
                 )
             }),
         Scenario::Descendant => required_path(args.sentinel_dir.as_deref(), "--sentinel-dir")
@@ -328,6 +337,7 @@ fn run_lifecycle(
     recovery_fault: Option<RecoveryFault>,
     lifecycle_fault: Option<LifecycleFault>,
     close_marker: Option<&Path>,
+    paginate_sessions: bool,
 ) -> io::Result<()> {
     if emit_diagnostic {
         eprintln!("fake-acp-agent: sanitized diagnostic fixture");
@@ -358,9 +368,11 @@ fn run_lifecycle(
         let Some(method) = frame.get("method").and_then(Value::as_str) else {
             continue;
         };
-        let Some(id) = frame.get("id").cloned() else {
+        if frame.get("id").is_none() {
+            handle_lifecycle_notification(&mut output, &mut state, method, &frame)?;
             continue;
-        };
+        }
+        let id = frame.get("id").cloned().expect("request frames have ids");
 
         match method {
             "initialize" => {
@@ -405,6 +417,9 @@ fn run_lifecycle(
                 )?;
                 if crash_after_new {
                     eprintln!("fake-acp-agent: deterministic post-session crash fixture");
+                    // Keep the child alive long enough for the client to read
+                    // the session/new result before stdout closes with the process.
+                    thread::sleep(Duration::from_millis(50));
                     std::process::exit(86);
                 }
             }
@@ -445,21 +460,9 @@ fn run_lifecycle(
                     )?;
                     continue;
                 }
-                let sessions = if state.session_created
-                    && request_cwd(&frame).is_none_or(|cwd| cwd_matches(&cwd, session_cwd(&state)))
-                {
-                    json!([{
-                        "sessionId": SESSION_ID,
-                        "cwd": session_cwd(&state),
-                        "title": "Sanitized fixture session",
-                        "updatedAt": "2030-01-01T00:00:00Z"
-                    }])
-                } else {
-                    json!([])
-                };
                 write_frame(
                     &mut output,
-                    result_response(id, json!({ "sessions": sessions })),
+                    result_response(id, list_sessions_result(&state, &frame, paginate_sessions)),
                 )?;
             }
             "session/resume" if state.authenticated && state.session_created => {
@@ -534,7 +537,12 @@ fn run_lifecycle(
                 }
                 state.prompt_count += 1;
                 if lifecycle_fault == Some(LifecycleFault::HangPrompt) && state.prompt_count == 1 {
+                    state.hanging_prompt_id = Some(id);
                     continue;
+                }
+                if lifecycle_fault == Some(LifecycleFault::CrashPrompt) && state.prompt_count == 1 {
+                    eprintln!("fake-acp-agent: deterministic prompt crash fixture");
+                    std::process::exit(86);
                 }
                 if lifecycle_fault == Some(LifecycleFault::PromptError) && state.prompt_count == 1 {
                     write_frame(
@@ -634,6 +642,7 @@ fn run_lifecycle(
                 }
             }
             "session/close" if state.authenticated && state.session_created => {
+                finish_hanging_prompt(&mut output, &mut state)?;
                 if lifecycle_fault == Some(LifecycleFault::HangClose) {
                     state.session_open = false;
                     continue;
@@ -650,6 +659,16 @@ fn run_lifecycle(
                     write_fixed_marker(path, CLOSED_SESSION_MARKER)?;
                 }
                 write_frame(&mut output, result_response(id, json!({})))?;
+            }
+            "$/cancel_request" => {
+                let matches_hanging = state
+                    .hanging_prompt_id
+                    .as_ref()
+                    .is_some_and(|hanging| frame.pointer("/params/id") == Some(hanging));
+                write_frame(&mut output, result_response(id, json!({})))?;
+                if matches_hanging {
+                    finish_hanging_prompt(&mut output, &mut state)?;
+                }
             }
             _ => write_frame(
                 &mut output,
@@ -987,6 +1006,75 @@ fn finish_cancelled_prompt(output: &mut impl Write, prompt_id: Value) -> io::Res
     )
 }
 
+fn finish_hanging_prompt(output: &mut impl Write, state: &mut LifecycleState) -> io::Result<()> {
+    if let Some(prompt_id) = state.hanging_prompt_id.take() {
+        write_frame(
+            output,
+            result_response(prompt_id, json!({ "stopReason": "cancelled" })),
+        )?;
+    }
+    Ok(())
+}
+
+fn handle_lifecycle_notification(
+    output: &mut impl Write,
+    state: &mut LifecycleState,
+    method: &str,
+    frame: &Value,
+) -> io::Result<()> {
+    match method {
+        "session/cancel"
+            if frame.pointer("/params/sessionId").and_then(Value::as_str) == Some(SESSION_ID) =>
+        {
+            finish_hanging_prompt(output, state)
+        }
+        "$/cancel_request"
+            if state
+                .hanging_prompt_id
+                .as_ref()
+                .is_some_and(|hanging| frame.pointer("/params/id") == Some(hanging)) =>
+        {
+            finish_hanging_prompt(output, state)
+        }
+        _ => Ok(()),
+    }
+}
+
+fn list_sessions_result(state: &LifecycleState, frame: &Value, paginate: bool) -> Value {
+    let cwd = session_cwd(state);
+    let in_workspace =
+        state.session_created && request_cwd(frame).is_none_or(|value| cwd_matches(&value, cwd));
+    let cursor = frame.pointer("/params/cursor").and_then(Value::as_str);
+    if paginate && in_workspace {
+        return match cursor {
+            None | Some("") => json!({
+                "sessions": [fixture_session_summary(SESSION_ID, cwd)],
+                "nextCursor": PAGE_TWO_CURSOR
+            }),
+            Some(PAGE_TWO_CURSOR) => json!({
+                "sessions": [fixture_session_summary(SESSION_ID_PAGE_TWO, cwd)]
+            }),
+            Some(_) => json!({ "sessions": [] }),
+        };
+    }
+    json!({
+        "sessions": if in_workspace {
+            json!([fixture_session_summary(SESSION_ID, cwd)])
+        } else {
+            json!([])
+        }
+    })
+}
+
+fn fixture_session_summary(session_id: &str, cwd: &str) -> Value {
+    json!({
+        "sessionId": session_id,
+        "cwd": cwd,
+        "title": "Sanitized fixture session",
+        "updatedAt": "2030-01-01T00:00:00Z"
+    })
+}
+
 fn prompt_text(frame: &Value) -> String {
     frame
         .pointer("/params/prompt")
@@ -1005,7 +1093,11 @@ fn prompt_text(frame: &Value) -> String {
 
 fn plan_review_action(frame: &Value) -> Option<&'static str> {
     let text = prompt_text(frame);
-    let command = text.trim().trim_start_matches('/').split_whitespace().next()?;
+    let command = text
+        .trim()
+        .trim_start_matches('/')
+        .split_whitespace()
+        .next()?;
     match command {
         "approve_plan" | "approve-plan" | "plan_approve" | "plan-approve" => Some("approve"),
         "revise_plan" | "revise-plan" | "plan_revise" | "plan-revise" => Some("revise"),
@@ -1041,7 +1133,10 @@ fn run_plan_review_prompt(
             ]
         })),
     )?;
-    write_frame(output, session_update(agent_message(message, "message-plan-review-001")))?;
+    write_frame(
+        output,
+        session_update(agent_message(message, "message-plan-review-001")),
+    )?;
     write_frame(
         output,
         result_response(prompt_id, json!({ "stopReason": "end_turn" })),
@@ -1056,6 +1151,7 @@ struct LifecycleState {
     session_open: bool,
     session_cwd: Option<String>,
     prompt_count: u64,
+    hanging_prompt_id: Option<Value>,
 }
 
 fn request_cwd(frame: &Value) -> Option<String> {

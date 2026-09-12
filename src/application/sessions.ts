@@ -35,6 +35,7 @@ export type SessionListPresentation = {
   canRetry: boolean;
   canOpen: boolean;
   canClose: boolean;
+  canLoadMore: boolean;
 };
 
 export function sameWorkspacePath(left: string, right: string): boolean {
@@ -71,6 +72,7 @@ export function describeSessionList(input: {
   listKind: SessionListKind;
   sessionCount: number;
   failure: ApplicationError | null;
+  nextCursor?: string | null;
 }): SessionListPresentation {
   const canCreate =
     input.workspace !== null &&
@@ -84,6 +86,14 @@ export function describeSessionList(input: {
     input.workspace !== null &&
     isRuntimeUsable(input.runtimeState) &&
     (input.capabilities?.close ?? false);
+  const canLoadMore =
+    input.workspace !== null &&
+    isRuntimeUsable(input.runtimeState) &&
+    (input.capabilities?.list ?? false) &&
+    (input.nextCursor ?? null) !== null &&
+    input.listKind !== "loading" &&
+    input.listKind !== "failed" &&
+    input.listKind !== "unavailable";
 
   if (input.workspace === null) {
     return presentation(
@@ -140,6 +150,7 @@ export function describeSessionList(input: {
       true,
       canOpen,
       canClose,
+      canLoadMore,
     );
   }
   if (input.sessionCount === 0) {
@@ -151,6 +162,7 @@ export function describeSessionList(input: {
       false,
       canOpen,
       canClose,
+      canLoadMore,
     );
   }
   return presentation(
@@ -161,6 +173,7 @@ export function describeSessionList(input: {
     false,
     canOpen,
     canClose,
+    canLoadMore,
   );
 }
 
@@ -179,6 +192,8 @@ export function describeSessionStatus(status: SessionRowStatus | SessionState): 
       return "Needs input";
     case "cancelling":
       return "Cancelling";
+    case "cancelled":
+      return "Cancelled";
     case "completed":
       return "Completed";
     case "closed":
@@ -206,6 +221,7 @@ function presentation(
   canRetry: boolean,
   canOpen: boolean,
   canClose: boolean,
+  canLoadMore = false,
 ): SessionListPresentation {
-  return { kind, heading, detail, canCreate, canRetry, canOpen, canClose };
+  return { kind, heading, detail, canCreate, canRetry, canOpen, canClose, canLoadMore };
 }

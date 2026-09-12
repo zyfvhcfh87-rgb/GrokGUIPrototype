@@ -76,8 +76,10 @@ test("the desktop bridge exposes only reviewed application commands and events",
     "workspace_validate",
     "workspace_recent_list",
     "workspace_recent_remove",
+    "workspace_changes",
     "open_external_url",
     "runtime_snapshot",
+    "runtime_diagnostics",
     "runtime_start",
     "runtime_stop",
     "runtime_restart",
@@ -108,7 +110,11 @@ test("the desktop bridge exposes only reviewed application commands and events",
   assert.doesNotMatch(bridge, /session\/(?:new|list|load|resume|prompt|cancel|close|set_)/u);
   assert.doesNotMatch(
     `${bridge}\n${productionContract}`,
-    /serde_json::Value|JsonRpc|request_id|grok agent stdio|auth\.json|stderr/u,
+    /serde_json::Value|JsonRpc|request_id|grok agent stdio|auth\.json/u,
+  );
+  assert.doesNotMatch(
+    `${bridge}\n${productionContract}`,
+    /stderr_text|stderr_output|ChildStderr/u,
   );
 });
 

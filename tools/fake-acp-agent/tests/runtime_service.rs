@@ -174,6 +174,52 @@ async fn a_crashed_runtime_reports_failure_and_can_restart_cleanly() {
 }
 
 #[tokio::test]
+async fn crash_loops_keep_a_single_runtime_and_remain_recoverable() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).args(["crash"]),
+    );
+
+    for expected in 1_u32..=3 {
+        let error = runtime
+            .start()
+            .await
+            .expect_err("crash fixture should fail start");
+        assert!(error.recoverable);
+        let health = runtime.health();
+        assert!(
+            !health.worker_running,
+            "a failed start must not leave a worker"
+        );
+        assert_eq!(health.consecutive_failures, expected);
+        assert_eq!(health.state, RuntimeState::Failed);
+        assert!(health.last_error.is_some());
+    }
+
+    runtime
+        .stop()
+        .await
+        .expect("stop after a crash loop should be idempotent");
+    assert!(!runtime.health().worker_running);
+}
+
+#[tokio::test]
+async fn concurrent_start_reuses_one_worker() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
+    );
+    let first = runtime.start();
+    let second = runtime.start();
+    let (first, second) = tokio::join!(first, second);
+    let first = first.expect("first start should succeed");
+    let second = second.expect("second start should reuse the worker");
+    assert_eq!(first.state, RuntimeState::Ready);
+    assert_eq!(second.state, RuntimeState::Ready);
+    assert!(runtime.health().worker_running);
+    runtime.stop().await.expect("runtime should stop");
+    assert!(!runtime.health().worker_running);
+}
+
+#[tokio::test]
 async fn session_lifecycle_is_exposed_without_acp_method_names() {
     let runtime = GrokRuntime::for_test(
         RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent")).auth_method("fixture_auth"),
@@ -1149,9 +1195,9 @@ async fn advertised_plan_review_replaces_the_saved_plan() {
                 .expect("runtime event stream should stay open")
             {
                 RuntimeEvent::PlanChanged { entries, .. }
-                    if entries
-                        .first()
-                        .is_some_and(|entry| entry.status == grok_runtime::PlanEntryStatus::Completed) =>
+                    if entries.first().is_some_and(|entry| {
+                        entry.status == grok_runtime::PlanEntryStatus::Completed
+                    }) =>
                 {
                     saw_approved_plan = true;
                 }
@@ -1170,6 +1216,42 @@ async fn advertised_plan_review_replaces_the_saved_plan() {
 
 #[tokio::test]
 async fn process_loss_during_a_hung_turn_fails_the_prompt() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "crash-prompt"])
+            .auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    let prompt_runtime = runtime.clone();
+    let session_id = session.session_id.clone();
+    let pending_prompt = tokio::spawn(async move {
+        prompt_runtime
+            .execute(RuntimeCommand::Prompt {
+                session_id,
+                text: "This turn crashes the agent process.".to_owned(),
+            })
+            .await
+    });
+    let error = pending_prompt
+        .await
+        .expect("hung prompt task should join")
+        .expect_err("process loss must fail the hung prompt");
+    assert_ne!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn cancel_during_hung_turn_settles_cancelled() {
     let runtime = GrokRuntime::for_test(
         RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
             .args(["lifecycle", "--lifecycle-fault", "hang-prompt"])
@@ -1192,7 +1274,7 @@ async fn process_loss_during_a_hung_turn_fails_the_prompt() {
         prompt_runtime
             .execute(RuntimeCommand::Prompt {
                 session_id,
-                text: "This turn hangs until the process is lost.".to_owned(),
+                text: "This turn hangs until cancelled.".to_owned(),
             })
             .await
     });
@@ -1206,12 +1288,114 @@ async fn process_loss_during_a_hung_turn_fails_the_prompt() {
             .expect("cancel should be acknowledged"),
         RuntimeResponse::Acknowledged
     );
-    runtime.stop().await.expect("runtime should stop");
-    let error = pending_prompt
+    let response = pending_prompt
         .await
         .expect("hung prompt task should join")
-        .expect_err("process loss must fail the hung prompt");
-    assert_ne!(error.code, grok_runtime::RuntimeErrorCode::InvalidRequest);
+        .expect("cancelled prompt should complete");
+    assert_eq!(
+        response,
+        RuntimeResponse::PromptCompleted {
+            stop_reason: RuntimePromptStopReason::Cancelled,
+        }
+    );
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn close_during_hung_turn_settles_cancelled() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--lifecycle-fault", "hang-prompt"])
+            .auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    let RuntimeResponse::Session(session) = runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created")
+    else {
+        panic!("expected a session response");
+    };
+    let prompt_runtime = runtime.clone();
+    let session_id = session.session_id.clone();
+    let pending_prompt = tokio::spawn(async move {
+        prompt_runtime
+            .execute(RuntimeCommand::Prompt {
+                session_id,
+                text: "This turn hangs until the session is closed.".to_owned(),
+            })
+            .await
+    });
+    tokio::time::sleep(Duration::from_millis(100)).await;
+    assert_eq!(
+        runtime
+            .execute(RuntimeCommand::CloseSession {
+                session_id: session.session_id,
+            })
+            .await
+            .expect("close should be acknowledged"),
+        RuntimeResponse::Acknowledged
+    );
+    let response = pending_prompt
+        .await
+        .expect("hung prompt task should join")
+        .expect("closed prompt should complete");
+    assert_eq!(
+        response,
+        RuntimeResponse::PromptCompleted {
+            stop_reason: RuntimePromptStopReason::Cancelled,
+        }
+    );
+    runtime.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn session_list_pagination_returns_the_next_workspace_page() {
+    let runtime = GrokRuntime::for_test(
+        RuntimeTestTarget::new(env!("CARGO_BIN_EXE_fake-acp-agent"))
+            .args(["lifecycle", "--paginate-sessions"])
+            .auth_method("fixture_auth"),
+    );
+    runtime.start().await.expect("runtime should start");
+    let workspace = tempfile::tempdir().expect("temporary workspace");
+    runtime
+        .execute(RuntimeCommand::NewSession {
+            workspace: workspace.path().to_path_buf(),
+        })
+        .await
+        .expect("session should be created");
+
+    let RuntimeResponse::Sessions(page_one) = runtime
+        .execute(RuntimeCommand::ListSessions {
+            workspace: Some(workspace.path().to_path_buf()),
+            cursor: None,
+        })
+        .await
+        .expect("first page should list")
+    else {
+        panic!("expected a session page");
+    };
+    assert_eq!(page_one.sessions.len(), 1);
+    assert_eq!(page_one.sessions[0].session_id, "session-001");
+    assert_eq!(page_one.next_cursor.as_deref(), Some("fixture-page-2"));
+
+    let RuntimeResponse::Sessions(page_two) = runtime
+        .execute(RuntimeCommand::ListSessions {
+            workspace: Some(workspace.path().to_path_buf()),
+            cursor: page_one.next_cursor,
+        })
+        .await
+        .expect("second page should list")
+    else {
+        panic!("expected a session page");
+    };
+    assert_eq!(page_two.sessions.len(), 1);
+    assert_eq!(page_two.sessions[0].session_id, "session-002");
+    assert!(page_two.next_cursor.is_none());
+    runtime.stop().await.expect("runtime should stop");
 }
 
 async fn complete_first_fixture_prompt(runtime: &GrokRuntime, session_id: &str) {

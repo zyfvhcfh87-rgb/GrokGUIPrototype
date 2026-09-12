@@ -24,8 +24,10 @@ pub const APPLICATION_COMMAND_NAMES: &[&str] = &[
     "workspace_validate",
     "workspace_recent_list",
     "workspace_recent_remove",
+    "workspace_changes",
     "open_external_url",
     "runtime_snapshot",
+    "runtime_diagnostics",
     "runtime_start",
     "runtime_stop",
     "runtime_restart",
@@ -58,6 +60,127 @@ pub struct OpenExternalUrlRequestDto {
 impl OpenExternalUrlRequestDto {
     pub fn validated_url(self) -> Result<String, ApplicationErrorDto> {
         validate_external_url(&self.url)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceChangeKindDto {
+    Repository,
+    NotARepository,
+    Unavailable,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceChangeStatusDto {
+    Added,
+    Modified,
+    Deleted,
+    Renamed,
+    Copied,
+    Unmerged,
+    Untracked,
+    Ignored,
+    Other,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum WorkspaceChangeContentDto {
+    Text,
+    Binary,
+    Omitted,
+    Unavailable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangeEntryDto {
+    pub path: String,
+    pub previous_path: Option<String>,
+    pub status: WorkspaceChangeStatusDto,
+    pub content: WorkspaceChangeContentDto,
+    pub diff: Option<String>,
+    pub truncated: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceChangesDto {
+    pub kind: WorkspaceChangeKindDto,
+    pub attributable_to_session: bool,
+    pub entries: Vec<WorkspaceChangeEntryDto>,
+    pub truncated: bool,
+    pub omitted_entry_count: u32,
+    pub omitted_line_count: u32,
+}
+
+impl WorkspaceChangesDto {
+    pub fn not_a_repository() -> Self {
+        Self {
+            kind: WorkspaceChangeKindDto::NotARepository,
+            attributable_to_session: false,
+            entries: Vec::new(),
+            truncated: false,
+            omitted_entry_count: 0,
+            omitted_line_count: 0,
+        }
+    }
+
+    pub fn unavailable() -> Self {
+        Self {
+            kind: WorkspaceChangeKindDto::Unavailable,
+            attributable_to_session: false,
+            entries: Vec::new(),
+            truncated: false,
+            omitted_entry_count: 0,
+            omitted_line_count: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeProcessContainmentDto {
+    WindowsJob,
+    DirectChild,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeDiagnosticsDto {
+    pub state: ApplicationRuntimeState,
+    pub worker_running: bool,
+    pub consecutive_failures: u32,
+    pub last_failure: Option<ApplicationErrorDto>,
+    pub stderr_lines: u64,
+    pub stderr_bytes: u64,
+    pub stderr_truncated_lines: u64,
+    pub stderr_read_errors: u64,
+    pub process_containment: RuntimeProcessContainmentDto,
+}
+
+impl RuntimeDiagnosticsDto {
+    pub fn from_health(health: grok_runtime::RuntimeHealth) -> Self {
+        Self {
+            state: health.state.into(),
+            worker_running: health.worker_running,
+            consecutive_failures: health.consecutive_failures,
+            last_failure: health.last_error.map(ApplicationErrorDto::from),
+            stderr_lines: health.stderr_lines,
+            stderr_bytes: health.stderr_bytes,
+            stderr_truncated_lines: health.stderr_truncated_lines,
+            stderr_read_errors: health.stderr_read_errors,
+            process_containment: match health.process_containment {
+                grok_runtime::RuntimeProcessContainment::WindowsJob => {
+                    RuntimeProcessContainmentDto::WindowsJob
+                }
+                grok_runtime::RuntimeProcessContainment::DirectChild => {
+                    RuntimeProcessContainmentDto::DirectChild
+                }
+            },
+        }
     }
 }
 
@@ -2708,7 +2831,46 @@ mod tests {
                 "value": "high", "name": "High", "description": null, "group": null
             })
         );
-        assert_eq!(dto_fields.len(), 39, "every reviewed DTO needs a fixture");
+        assert_fields!(
+            "workspaceChanges",
+            WorkspaceChangesDto,
+            json!({
+                "kind": "repository",
+                "attributableToSession": false,
+                "entries": [],
+                "truncated": false,
+                "omittedEntryCount": 0,
+                "omittedLineCount": 0
+            })
+        );
+        assert_fields!(
+            "workspaceChangeEntry",
+            WorkspaceChangeEntryDto,
+            json!({
+                "path": "src/lib.rs",
+                "previousPath": null,
+                "status": "modified",
+                "content": "text",
+                "diff": "@@ -1 +1 @@",
+                "truncated": false
+            })
+        );
+        assert_fields!(
+            "runtimeDiagnostics",
+            RuntimeDiagnosticsDto,
+            json!({
+                "state": "ready",
+                "workerRunning": true,
+                "consecutiveFailures": 0,
+                "lastFailure": null,
+                "stderrLines": 0,
+                "stderrBytes": 0,
+                "stderrTruncatedLines": 0,
+                "stderrReadErrors": 0,
+                "processContainment": "direct_child"
+            })
+        );
+        assert_eq!(dto_fields.len(), 42, "every reviewed DTO needs a fixture");
 
         assert_values!(
             "runtimeState",
@@ -2871,7 +3033,45 @@ mod tests {
                 ApplicationErrorCodeDto::PreferencesUnavailable
             ]
         );
-        assert_eq!(enum_values.len(), 15, "every reviewed enum needs a fixture");
+        assert_values!(
+            "workspaceChangeKind",
+            [
+                WorkspaceChangeKindDto::Repository,
+                WorkspaceChangeKindDto::NotARepository,
+                WorkspaceChangeKindDto::Unavailable
+            ]
+        );
+        assert_values!(
+            "workspaceChangeStatus",
+            [
+                WorkspaceChangeStatusDto::Added,
+                WorkspaceChangeStatusDto::Modified,
+                WorkspaceChangeStatusDto::Deleted,
+                WorkspaceChangeStatusDto::Renamed,
+                WorkspaceChangeStatusDto::Copied,
+                WorkspaceChangeStatusDto::Unmerged,
+                WorkspaceChangeStatusDto::Untracked,
+                WorkspaceChangeStatusDto::Ignored,
+                WorkspaceChangeStatusDto::Other
+            ]
+        );
+        assert_values!(
+            "workspaceChangeContent",
+            [
+                WorkspaceChangeContentDto::Text,
+                WorkspaceChangeContentDto::Binary,
+                WorkspaceChangeContentDto::Omitted,
+                WorkspaceChangeContentDto::Unavailable
+            ]
+        );
+        assert_values!(
+            "runtimeProcessContainment",
+            [
+                RuntimeProcessContainmentDto::WindowsJob,
+                RuntimeProcessContainmentDto::DirectChild
+            ]
+        );
+        assert_eq!(enum_values.len(), 19, "every reviewed enum needs a fixture");
 
         assert_variant_fields!(
             "permissionScope",

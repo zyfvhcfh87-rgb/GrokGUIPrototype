@@ -73,6 +73,59 @@ impl AgentProcess {
             .expect("fake agent closed stdout");
         serde_json::from_str(&line).expect("stdout must contain JSON-RPC only")
     }
+
+    async fn initialize_authenticate_and_open_session(&mut self) {
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": { "protocolVersion": 1, "clientCapabilities": {} }
+        }))
+        .await;
+        assert_eq!(self.receive().await["id"], 1);
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "authenticate",
+            "params": { "methodId": "fixture_auth" }
+        }))
+        .await;
+        assert_eq!(
+            self.receive().await,
+            json!({ "jsonrpc": "2.0", "id": 2, "result": {} })
+        );
+
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": 3,
+            "method": "session/new",
+            "params": { "cwd": "C:\\fixture-workspace", "mcpServers": [] }
+        }))
+        .await;
+        assert_eq!(self.receive().await["result"]["sessionId"], "session-001");
+    }
+
+    async fn hang_first_prompt(&mut self) {
+        self.send(json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/prompt",
+            "params": {
+                "sessionId": "session-001",
+                "prompt": [{ "type": "text", "text": "Hang until cancelled." }]
+            }
+        }))
+        .await;
+    }
+}
+
+fn hang_prompt_agent() -> AgentProcess {
+    AgentProcess::spawn_args([
+        OsString::from("lifecycle"),
+        OsString::from("--lifecycle-fault"),
+        OsString::from("hang-prompt"),
+    ])
 }
 
 #[tokio::test]
@@ -363,6 +416,11 @@ async fn lifecycle_streams_prompt_updates_and_honors_callback_responses() {
         message["params"]["update"]["sessionUpdate"],
         "agent_message_chunk"
     );
+    let commands = agent.receive().await;
+    assert_eq!(
+        commands["params"]["update"]["sessionUpdate"],
+        "available_commands_update"
+    );
     let plan = agent.receive().await;
     assert_eq!(plan["params"]["update"]["sessionUpdate"], "plan");
     assert_eq!(
@@ -434,6 +492,186 @@ async fn lifecycle_streams_prompt_updates_and_honors_callback_responses() {
     assert_eq!(
         agent.receive().await,
         json!({ "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "end_turn" } })
+    );
+
+    drop(agent.stdin);
+    let status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("fake agent should exit after stdin closes")
+        .expect("fake agent should be waitable");
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn paginated_session_list_returns_a_second_page() {
+    let mut agent = AgentProcess::spawn_args([
+        OsString::from("lifecycle"),
+        OsString::from("--paginate-sessions"),
+    ]);
+    agent.initialize_authenticate_and_open_session().await;
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 4,
+            "method": "session/list",
+            "params": { "cwd": "C:\\fixture-workspace" }
+        }))
+        .await;
+    let page_one = agent.receive().await;
+    assert_eq!(
+        page_one["result"]["sessions"][0]["sessionId"],
+        "session-001"
+    );
+    assert_eq!(page_one["result"]["nextCursor"], "fixture-page-2");
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "session/list",
+            "params": {
+                "cwd": "C:\\fixture-workspace",
+                "cursor": "fixture-page-2"
+            }
+        }))
+        .await;
+    let page_two = agent.receive().await;
+    assert_eq!(
+        page_two["result"]["sessions"][0]["sessionId"],
+        "session-002"
+    );
+    assert!(page_two["result"]["nextCursor"].is_null());
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 6,
+            "method": "session/list",
+            "params": {
+                "cwd": "C:\\fixture-workspace",
+                "cursor": "unknown-cursor"
+            }
+        }))
+        .await;
+    assert_eq!(agent.receive().await["result"]["sessions"], json!([]));
+
+    drop(agent.stdin);
+    let status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("fake agent should exit after stdin closes")
+        .expect("fake agent should be waitable");
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn hang_prompt_session_cancel_resolves_cancelled() {
+    let mut agent = hang_prompt_agent();
+    agent.initialize_authenticate_and_open_session().await;
+    agent.hang_first_prompt().await;
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "method": "session/cancel",
+            "params": { "sessionId": "session-001" }
+        }))
+        .await;
+    assert_eq!(
+        agent.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "cancelled" } })
+    );
+
+    drop(agent.stdin);
+    let status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("fake agent should exit after stdin closes")
+        .expect("fake agent should be waitable");
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn hang_prompt_cancel_request_notification_resolves_cancelled() {
+    let mut agent = hang_prompt_agent();
+    agent.initialize_authenticate_and_open_session().await;
+    agent.hang_first_prompt().await;
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "method": "$/cancel_request",
+            "params": { "id": 4 }
+        }))
+        .await;
+    let cancelled = agent.receive().await;
+    assert_eq!(
+        cancelled,
+        json!({ "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "cancelled" } })
+    );
+    assert_ne!(cancelled["error"]["code"], -32800);
+
+    drop(agent.stdin);
+    let status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("fake agent should exit after stdin closes")
+        .expect("fake agent should be waitable");
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn hang_prompt_cancel_request_request_resolves_cancelled() {
+    let mut agent = hang_prompt_agent();
+    agent.initialize_authenticate_and_open_session().await;
+    agent.hang_first_prompt().await;
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "$/cancel_request",
+            "params": { "id": 4 }
+        }))
+        .await;
+    assert_eq!(
+        agent.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 5, "result": {} })
+    );
+    let cancelled = agent.receive().await;
+    assert_eq!(
+        cancelled,
+        json!({ "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "cancelled" } })
+    );
+    assert_ne!(cancelled["error"]["code"], -32800);
+
+    drop(agent.stdin);
+    let status = timeout(Duration::from_secs(2), agent.child.wait())
+        .await
+        .expect("fake agent should exit after stdin closes")
+        .expect("fake agent should be waitable");
+    assert!(status.success());
+}
+
+#[tokio::test]
+async fn hang_prompt_session_close_resolves_cancelled_then_close() {
+    let mut agent = hang_prompt_agent();
+    agent.initialize_authenticate_and_open_session().await;
+    agent.hang_first_prompt().await;
+
+    agent
+        .send(json!({
+            "jsonrpc": "2.0",
+            "id": 5,
+            "method": "session/close",
+            "params": { "sessionId": "session-001" }
+        }))
+        .await;
+    assert_eq!(
+        agent.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 4, "result": { "stopReason": "cancelled" } })
+    );
+    assert_eq!(
+        agent.receive().await,
+        json!({ "jsonrpc": "2.0", "id": 5, "result": {} })
     );
 
     drop(agent.stdin);

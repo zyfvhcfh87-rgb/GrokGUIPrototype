@@ -1,5 +1,6 @@
 mod application_contract;
 mod workspace;
+mod workspace_changes;
 
 use std::{path::PathBuf, sync::Arc, time::Duration};
 
@@ -8,10 +9,11 @@ use application_contract::{
     ApplicationEventClock, ElicitationResponseRequestDto, ExecutableSourceDto, ExecutableStateDto,
     InteractionKindDto, ListSessionsRequestDto, NewSessionRequestDto, OpenExternalUrlRequestDto,
     PermissionResponseRequestDto, PromptRequestDto, PromptResultDto, RecentWorkspaceListDto,
-    RuntimeSnapshotDto, SessionDto, SessionPageDto, SessionRequestDto, SessionWorkspaceRequestDto,
-    SetSessionConfigRequestDto, SetSessionModeRequestDto, SetSessionModelRequestDto,
-    SetupStatusDto, WorkspaceDto, WorkspaceRequestDto, acknowledgement_from_response,
-    prompt_from_response, session_from_response, sessions_from_response,
+    RuntimeDiagnosticsDto, RuntimeSnapshotDto, SessionDto, SessionPageDto, SessionRequestDto,
+    SessionWorkspaceRequestDto, SetSessionConfigRequestDto, SetSessionModeRequestDto,
+    SetSessionModelRequestDto, SetupStatusDto, WorkspaceDto, WorkspaceRequestDto,
+    acknowledgement_from_response, prompt_from_response, session_from_response,
+    sessions_from_response,
 };
 use grok_runtime::{
     GrokRuntime, RedactedDiagnostic, ResolveGrokExecutableError, RuntimeCommand, RuntimeError,
@@ -268,6 +270,22 @@ fn runtime_snapshot(
     manager: tauri::State<'_, RuntimeManager>,
 ) -> Result<RuntimeSnapshotDto, ApplicationErrorDto> {
     manager.snapshot()
+}
+
+#[tauri::command]
+fn runtime_diagnostics(
+    manager: tauri::State<'_, RuntimeManager>,
+) -> Result<RuntimeDiagnosticsDto, ApplicationErrorDto> {
+    Ok(RuntimeDiagnosticsDto::from_health(
+        manager.runtime()?.health(),
+    ))
+}
+
+#[tauri::command]
+async fn workspace_changes(
+    request: WorkspaceRequestDto,
+) -> Result<application_contract::WorkspaceChangesDto, ApplicationErrorDto> {
+    crate::workspace_changes::inspect_workspace_changes(&request.into_path()?).await
 }
 
 #[tauri::command]
@@ -568,8 +586,10 @@ pub fn run() {
             workspace_validate,
             workspace_recent_list,
             workspace_recent_remove,
+            workspace_changes,
             open_external_url,
             runtime_snapshot,
+            runtime_diagnostics,
             runtime_start,
             runtime_stop,
             runtime_restart,

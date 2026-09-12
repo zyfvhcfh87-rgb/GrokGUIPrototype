@@ -14,9 +14,15 @@ import {
 import { describeLaunchState, describeWorkspaceList } from "./application/setup.ts";
 import { createTauriTransport } from "./application/tauri.ts";
 import appIcon from "./assets/app-icon.svg";
+import {
+  describeWorkspaceChanges,
+  describeRuntimeHealth,
+  createWorkspaceHealthController,
+} from "./application/workspace-health.ts";
 import { ActivityPane } from "./cockpit/ActivityPane.tsx";
 import { ConversationPane } from "./cockpit/ConversationPane.tsx";
 import { InteractionPane } from "./cockpit/InteractionPane.tsx";
+import { WorkspaceHealthPane } from "./cockpit/WorkspaceHealthPane.tsx";
 
 export type AppProps = {
   transport?: ApplicationTransport;
@@ -53,9 +59,11 @@ export function App({
   const controller = useMemo(() => createSetupController(bridge), [bridge]);
   const sessions = useMemo(() => createSessionController(bridge), [bridge]);
   const conversation = useMemo(() => createConversationController(bridge), [bridge]);
+  const health = useMemo(() => createWorkspaceHealthController(bridge), [bridge]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const sessionState = useSyncExternalStore(sessions.subscribe, sessions.getState);
   const conversationState = useSyncExternalStore(conversation.subscribe, conversation.getState);
+  const healthState = useSyncExternalStore(health.subscribe, health.getState);
   const readInteractionContext = useMemo(() => (): InteractionContext => {
     const current = conversation.getState();
     const navigation = sessions.getState();
@@ -78,12 +86,14 @@ export function App({
     void controller.initialize();
     void sessions.initialize();
     void conversation.initialize();
+    void health.refreshDiagnostics();
     return () => {
       controller.dispose();
       sessions.dispose();
       conversation.dispose();
+      health.dispose();
     };
-  }, [controller, conversation, sessions]);
+  }, [controller, conversation, health, sessions]);
 
   useEffect(() => {
     sessions.setRuntime(state.runtimeState, state.capabilities);
@@ -105,6 +115,20 @@ export function App({
   useEffect(() => {
     conversation.setSession(sessionState.selectedSession);
   }, [conversation, sessionState.selectedSession]);
+
+  useEffect(() => {
+    void health.setWorkspace(state.selectedWorkspace);
+  }, [health, state.selectedWorkspace]);
+
+  useEffect(() => {
+    if (
+      state.runtimeState === "failed" ||
+      state.runtimeState === "disconnected" ||
+      state.runtimeState === "ready"
+    ) {
+      void health.refreshDiagnostics();
+    }
+  }, [health, state.runtimeState]);
 
   const autoWorkspaceStarted = useRef(false);
   const autoSessionStarted = useRef(false);
@@ -146,9 +170,33 @@ export function App({
     listKind: sessionState.listKind,
     sessionCount: sessionState.sessions.length,
     failure: sessionState.failure,
+    nextCursor: sessionState.nextCursor,
   });
   const agent = state.capabilities?.agent;
   const authMethods = state.capabilities?.authenticationMethods ?? [];
+  const changesView = describeWorkspaceChanges({
+    workspace: healthState.workspace,
+    changes: healthState.changes,
+    failure: healthState.changesFailure,
+    loading: healthState.loadingChanges,
+  });
+  const healthView = describeRuntimeHealth({
+    diagnostics: healthState.diagnostics,
+    failure: healthState.diagnosticsFailure ?? state.failure,
+    loading: healthState.loadingDiagnostics,
+  });
+  const healthPane = (
+    <WorkspaceHealthPane
+      changes={changesView}
+      health={healthView}
+      onRefreshChanges={() => void health.refreshChanges()}
+      onRefreshDiagnostics={() => void health.refreshDiagnostics()}
+      onRecover={() => {
+        void controller.retry();
+        void health.refreshDiagnostics();
+      }}
+    />
+  );
   const cockpitClassName = [
     "cockpit",
     !projectsOpen && "cockpit--projects-collapsed",
@@ -388,6 +436,16 @@ export function App({
                   ))}
                 </ul>
               ) : null}
+              {sessionList.canLoadMore ? (
+                <button
+                  className="button button--wide"
+                  type="button"
+                  disabled={sessionState.loadingMore}
+                  onClick={() => void sessions.loadMore()}
+                >
+                  {sessionState.loadingMore ? "Loading more…" : "Load more"}
+                </button>
+              ) : null}
             </section>
           ) : null}
           </aside>
@@ -498,6 +556,7 @@ export function App({
             <ActivityPane
               presentation={conversationView}
               controlBusy={conversationState.controlBusy}
+              health={healthPane}
               onModelChange={(modelId) =>
                 void conversation
                   .setModel(modelId, conversationView.controls.currentReasoningValue)
@@ -586,6 +645,7 @@ export function App({
             <span aria-hidden="true">⌾</span>
             Credential contents stay with Grok and never cross into this interface.
           </p>
+          {healthPane}
             </>
           )}
           </aside>

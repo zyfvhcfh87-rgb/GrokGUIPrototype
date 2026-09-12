@@ -6,8 +6,10 @@ export const APPLICATION_COMMANDS = {
   validateWorkspace: "workspace_validate",
   listRecentWorkspaces: "workspace_recent_list",
   removeRecentWorkspace: "workspace_recent_remove",
+  inspectWorkspaceChanges: "workspace_changes",
   openExternalUrl: "open_external_url",
   runtimeSnapshot: "runtime_snapshot",
+  runtimeDiagnostics: "runtime_diagnostics",
   startRuntime: "runtime_start",
   stopRuntime: "runtime_stop",
   restartRuntime: "runtime_restart",
@@ -332,6 +334,46 @@ export type RecentWorkspace = {
   lastSessionId: string | null;
 };
 export type RecentWorkspaceList = { workspaces: RecentWorkspace[] };
+export type WorkspaceChangeKind = "repository" | "not_a_repository" | "unavailable";
+export type WorkspaceChangeStatus =
+  | "added"
+  | "modified"
+  | "deleted"
+  | "renamed"
+  | "copied"
+  | "unmerged"
+  | "untracked"
+  | "ignored"
+  | "other";
+export type WorkspaceChangeContent = "text" | "binary" | "omitted" | "unavailable";
+export type WorkspaceChangeEntry = {
+  path: string;
+  previousPath: string | null;
+  status: WorkspaceChangeStatus;
+  content: WorkspaceChangeContent;
+  diff: string | null;
+  truncated: boolean;
+};
+export type WorkspaceChanges = {
+  kind: WorkspaceChangeKind;
+  attributableToSession: boolean;
+  entries: WorkspaceChangeEntry[];
+  truncated: boolean;
+  omittedEntryCount: number;
+  omittedLineCount: number;
+};
+export type RuntimeProcessContainment = "windows_job" | "direct_child";
+export type RuntimeDiagnostics = {
+  state: RuntimeState;
+  workerRunning: boolean;
+  consecutiveFailures: number;
+  lastFailure: ApplicationError | null;
+  stderrLines: number;
+  stderrBytes: number;
+  stderrTruncatedLines: number;
+  stderrReadErrors: number;
+  processContainment: RuntimeProcessContainment;
+};
 export type NewSessionRequest = { workspace: string };
 export type ListSessionsRequest = {
   workspace: string | null;
@@ -550,6 +592,33 @@ export const APPLICATION_DTO_FIELDS = {
   workspace: fieldsOf<Workspace>()(["path"]),
   recentWorkspace: fieldsOf<RecentWorkspace>()(["available", "lastSessionId", "path"]),
   recentWorkspaceList: fieldsOf<RecentWorkspaceList>()(["workspaces"]),
+  workspaceChanges: fieldsOf<WorkspaceChanges>()([
+    "attributableToSession",
+    "entries",
+    "kind",
+    "omittedEntryCount",
+    "omittedLineCount",
+    "truncated",
+  ]),
+  workspaceChangeEntry: fieldsOf<WorkspaceChangeEntry>()([
+    "content",
+    "diff",
+    "path",
+    "previousPath",
+    "status",
+    "truncated",
+  ]),
+  runtimeDiagnostics: fieldsOf<RuntimeDiagnostics>()([
+    "consecutiveFailures",
+    "lastFailure",
+    "processContainment",
+    "state",
+    "stderrBytes",
+    "stderrLines",
+    "stderrReadErrors",
+    "stderrTruncatedLines",
+    "workerRunning",
+  ]),
   newSessionRequest: fieldsOf<NewSessionRequest>()(["workspace"]),
   listSessionsRequest: fieldsOf<ListSessionsRequest>()(["cursor", "workspace"]),
   sessionWorkspaceRequest: fieldsOf<SessionWorkspaceRequest>()(["sessionId", "workspace"]),
@@ -854,5 +923,31 @@ export const APPLICATION_ENUM_VALUES = {
     "unexpected_response",
     "boundary_violation",
     "preferences_unavailable",
+  ]),
+  workspaceChangeKind: valuesOf<WorkspaceChangeKind>()([
+    "repository",
+    "not_a_repository",
+    "unavailable",
+  ]),
+  workspaceChangeStatus: valuesOf<WorkspaceChangeStatus>()([
+    "added",
+    "modified",
+    "deleted",
+    "renamed",
+    "copied",
+    "unmerged",
+    "untracked",
+    "ignored",
+    "other",
+  ]),
+  workspaceChangeContent: valuesOf<WorkspaceChangeContent>()([
+    "text",
+    "binary",
+    "omitted",
+    "unavailable",
+  ]),
+  runtimeProcessContainment: valuesOf<RuntimeProcessContainment>()([
+    "windows_job",
+    "direct_child",
   ]),
 } as const;

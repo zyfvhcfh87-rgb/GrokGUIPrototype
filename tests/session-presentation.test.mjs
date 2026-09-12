@@ -121,6 +121,83 @@ test("session list presentation covers idle, loading, empty, ready, stale, and f
   );
 });
 
+test("Load more is offered only when a usable runtime has a next cursor", () => {
+  const ready = describeSessionList({
+    workspace: "C:\\work",
+    runtimeState: "ready",
+    capabilities,
+    listKind: "ready",
+    sessionCount: 1,
+    failure: null,
+    nextCursor: "page-2",
+  });
+  assert.equal(ready.canLoadMore, true);
+
+  assert.equal(
+    describeSessionList({
+      workspace: "C:\\work",
+      runtimeState: "ready",
+      capabilities,
+      listKind: "ready",
+      sessionCount: 1,
+      failure: null,
+    }).canLoadMore,
+    false,
+  );
+  assert.equal(
+    describeSessionList({
+      workspace: "C:\\work",
+      runtimeState: "ready",
+      capabilities,
+      listKind: "empty",
+      sessionCount: 0,
+      failure: null,
+      nextCursor: "page-2",
+    }).canLoadMore,
+    true,
+  );
+  assert.equal(
+    describeSessionList({
+      workspace: "C:\\work",
+      runtimeState: "ready",
+      capabilities,
+      listKind: "loading",
+      sessionCount: 1,
+      failure: null,
+      nextCursor: "page-2",
+    }).canLoadMore,
+    false,
+  );
+  assert.equal(
+    describeSessionList({
+      workspace: "C:\\work",
+      runtimeState: "ready",
+      capabilities,
+      listKind: "failed",
+      sessionCount: 1,
+      failure: {
+        code: "protocol_request_failed",
+        diagnostic: "Sessions for this workspace could not be loaded.",
+        recoverable: true,
+      },
+      nextCursor: "page-2",
+    }).canLoadMore,
+    false,
+  );
+  assert.equal(
+    describeSessionList({
+      workspace: "C:\\work",
+      runtimeState: "disconnected",
+      capabilities,
+      listKind: "unavailable",
+      sessionCount: 0,
+      failure: null,
+      nextCursor: "page-2",
+    }).canLoadMore,
+    false,
+  );
+});
+
 test("session status labels stay distinct for selected, closed, stale, and failed", () => {
   assert.equal(describeSessionStatus("selected"), "Selected");
   assert.equal(describeSessionStatus("closed"), "Closed");

@@ -1011,6 +1011,72 @@ button:focus-visible {
   font-size: 0.68rem;
 }
 
+.workspace-health {
+  display: grid;
+  gap: 1.1rem;
+  margin-top: 1rem;
+}
+
+.workspace-health__section h2 {
+  margin: 0;
+  font-size: 0.78rem;
+}
+
+.workspace-health__section p {
+  margin: 0.35rem 0 0;
+  color: #8b91a0;
+  font-size: 0.72rem;
+}
+
+.workspace-health__disclaimer {
+  color: #c6cbe0 !important;
+}
+
+.workspace-health__muted {
+  color: #737987;
+  font-size: 0.68rem;
+}
+
+.change-list {
+  margin: 0.6rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.change-list li {
+  border-top: 1px solid rgb(255 255 255 / 5%);
+}
+
+.change-list summary {
+  display: grid;
+  gap: 0.12rem;
+  padding: 0.45rem 0;
+  cursor: pointer;
+}
+
+.change-list summary strong {
+  color: #d7dbe6;
+  font-size: 0.7rem;
+}
+
+.change-list summary small {
+  color: #7f8593;
+  font-size: 0.6rem;
+}
+
+.change-diff {
+  margin: 0 0 0.6rem;
+  padding: 0.6rem;
+  overflow: auto;
+  max-height: 12rem;
+  border: 1px solid rgb(255 255 255 / 7%);
+  border-radius: 10px;
+  background: rgb(0 0 0 / 28%);
+  color: #cfd3de;
+  font-size: 0.62rem;
+  white-space: pre-wrap;
+}
+
 .activity-tools,
 .plan-list {
   margin: 0.7rem 0 0;

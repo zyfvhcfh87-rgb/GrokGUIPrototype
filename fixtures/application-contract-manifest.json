@@ -7,8 +7,10 @@
     "workspace_validate",
     "workspace_recent_list",
     "workspace_recent_remove",
+    "workspace_changes",
     "open_external_url",
     "runtime_snapshot",
+    "runtime_diagnostics",
     "runtime_start",
     "runtime_stop",
     "runtime_restart",
@@ -33,6 +35,33 @@
     "workspace": ["path"],
     "recentWorkspace": ["available", "lastSessionId", "path"],
     "recentWorkspaceList": ["workspaces"],
+    "workspaceChanges": [
+      "attributableToSession",
+      "entries",
+      "kind",
+      "omittedEntryCount",
+      "omittedLineCount",
+      "truncated"
+    ],
+    "workspaceChangeEntry": [
+      "content",
+      "diff",
+      "path",
+      "previousPath",
+      "status",
+      "truncated"
+    ],
+    "runtimeDiagnostics": [
+      "consecutiveFailures",
+      "lastFailure",
+      "processContainment",
+      "state",
+      "stderrBytes",
+      "stderrLines",
+      "stderrReadErrors",
+      "stderrTruncatedLines",
+      "workerRunning"
+    ],
     "newSessionRequest": ["workspace"],
     "listSessionsRequest": ["cursor", "workspace"],
     "sessionWorkspaceRequest": ["sessionId", "workspace"],
@@ -121,7 +150,11 @@
     "planEntryStatus": ["pending", "in_progress", "completed"],
     "observedExtensionClassification": ["unknown", "invalid"],
     "interactionKind": ["permission", "elicitation"],
-    "applicationErrorCode": ["executable_unavailable", "process_start_failed", "connection_failed", "request_timed_out", "initialize_failed", "unsupported_protocol", "unsupported_authentication", "authentication_failed", "runtime_stopped", "invalid_workspace", "invalid_request", "capability_unavailable", "protocol_request_failed", "malformed_response", "unknown_interaction", "decision_unavailable", "unexpected_response", "boundary_violation", "preferences_unavailable"]
+    "applicationErrorCode": ["executable_unavailable", "process_start_failed", "connection_failed", "request_timed_out", "initialize_failed", "unsupported_protocol", "unsupported_authentication", "authentication_failed", "runtime_stopped", "invalid_workspace", "invalid_request", "capability_unavailable", "protocol_request_failed", "malformed_response", "unknown_interaction", "decision_unavailable", "unexpected_response", "boundary_violation", "preferences_unavailable"],
+    "workspaceChangeKind": ["repository", "not_a_repository", "unavailable"],
+    "workspaceChangeStatus": ["added", "modified", "deleted", "renamed", "copied", "unmerged", "untracked", "ignored", "other"],
+    "workspaceChangeContent": ["text", "binary", "omitted", "unavailable"],
+    "runtimeProcessContainment": ["windows_job", "direct_child"]
   },
   "events": {
     "runtime_state_changed": ["state"],

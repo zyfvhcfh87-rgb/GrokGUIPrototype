@@ -13,7 +13,9 @@ Windows Job Object-contained ACP process
 
 ## Public boundary
 
-The native application core can discover/start/stop/restart the runtime, read its snapshot, execute a `RuntimeCommand`, subscribe to `RuntimeEvent`, and answer a GUI-owned permission or elicitation interaction ID. Tauri maps that internal interface to operation-specific application commands; the generic enums are not React inputs. The reviewed application contract is documented in [the application contract note](application-contract.md).
+The native application core can discover/start/stop/restart the runtime, read its snapshot and bounded health, execute a `RuntimeCommand`, subscribe to `RuntimeEvent`, and answer a GUI-owned permission or elicitation interaction ID. Tauri maps that internal interface to operation-specific application commands; the generic enums are not React inputs. The reviewed application contract is documented in [the application contract note](application-contract.md).
+
+`health()` reports worker liveness, consecutive start/crash failures, the last redacted error, stderr counters when available, and whether the child is Job Object-contained. It never includes stderr text, process IDs, or executable arguments. Start and restart are serialized; a second start while a worker is alive returns the current snapshot instead of spawning another child. Crash-loop Recover uses the same `restart()` path.
 
 Responses and events contain bounded application data: negotiated capabilities, sanitized session summaries, streamed text and thought chunks, tool state, exact validated permission scope, elicitation forms, plans, usage supplied by the runtime, lifecycle state, safe standard metadata, normalized `x.ai/*` extension updates, and redacted diagnostics.
 

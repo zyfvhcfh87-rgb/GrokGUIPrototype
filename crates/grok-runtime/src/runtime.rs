@@ -3,7 +3,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         Arc, Mutex as StdMutex, RwLock,
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -89,6 +89,11 @@ struct RuntimeShared {
     active_prompts: RwLock<BTreeSet<String>>,
     session_controls: StdMutex<HashMap<String, RuntimeSessionControls>>,
     session_workspaces: StdMutex<HashMap<String, PathBuf>>,
+    worker_running: AtomicBool,
+    consecutive_failures: AtomicU32,
+    last_error: StdMutex<Option<RuntimeError>>,
+    #[cfg(windows)]
+    stderr: crate::ProcessDiagnostics,
 }
 
 #[derive(Default)]
@@ -201,6 +206,27 @@ impl RuntimeTestTarget {
         self.request_timeout = timeout;
         self
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeProcessContainment {
+    WindowsJob,
+    DirectChild,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeHealth {
+    pub state: RuntimeState,
+    pub worker_running: bool,
+    pub consecutive_failures: u32,
+    pub last_error: Option<RuntimeError>,
+    pub stderr_lines: u64,
+    pub stderr_bytes: u64,
+    pub stderr_truncated_lines: u64,
+    pub stderr_read_errors: u64,
+    pub process_containment: RuntimeProcessContainment,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize)]
@@ -550,6 +576,11 @@ impl GrokRuntime {
                 active_prompts: RwLock::new(BTreeSet::new()),
                 session_controls: StdMutex::new(HashMap::new()),
                 session_workspaces: StdMutex::new(HashMap::new()),
+                worker_running: AtomicBool::new(false),
+                consecutive_failures: AtomicU32::new(0),
+                last_error: StdMutex::new(None),
+                #[cfg(windows)]
+                stderr: crate::ProcessDiagnostics::default(),
             }),
             target,
             operation: Arc::new(Mutex::new(())),
@@ -571,6 +602,11 @@ impl GrokRuntime {
             .clone()
     }
 
+    #[must_use]
+    pub fn health(&self) -> RuntimeHealth {
+        self.shared.health()
+    }
+
     pub async fn start(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         let _operation = self.operation.lock().await;
 
@@ -585,7 +621,17 @@ impl GrokRuntime {
                 let _ = finished.task.await;
             }
         }
-        self.start_inner().await
+        match self.start_inner().await {
+            Ok(snapshot) => {
+                self.shared.clear_failures();
+                Ok(snapshot)
+            }
+            Err(error) => {
+                self.shared.record_start_failure(&error);
+                self.shared.fail(&error);
+                Err(error)
+            }
+        }
     }
 
     pub async fn stop(&self) -> Result<(), RuntimeError> {
@@ -597,7 +643,17 @@ impl GrokRuntime {
     pub async fn restart(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         let _operation = self.operation.lock().await;
         self.stop_inner().await;
-        self.start_inner().await
+        match self.start_inner().await {
+            Ok(snapshot) => {
+                self.shared.clear_failures();
+                Ok(snapshot)
+            }
+            Err(error) => {
+                self.shared.record_start_failure(&error);
+                self.shared.fail(&error);
+                Err(error)
+            }
+        }
     }
 
     pub async fn execute(&self, command: RuntimeCommand) -> Result<RuntimeResponse, RuntimeError> {
@@ -743,6 +799,7 @@ impl GrokRuntime {
         let task = tokio::spawn(async move {
             run_worker(target, shared, command_rx, ready_tx).await;
         });
+        self.shared.worker_running.store(true, Ordering::Relaxed);
         *self.worker.lock().await = Some(RuntimeWorker { commands, task });
         let result = match ready_rx.await {
             Ok(result) => result,
@@ -767,13 +824,80 @@ impl GrokRuntime {
 
     async fn shutdown_current_worker(&self) {
         let Some(worker) = self.worker.lock().await.take() else {
+            self.shared.worker_running.store(false, Ordering::Relaxed);
             return;
         };
         shutdown_worker(worker).await;
+        self.shared.worker_running.store(false, Ordering::Relaxed);
     }
 }
 
 impl RuntimeShared {
+    fn health(&self) -> RuntimeHealth {
+        #[cfg(windows)]
+        let stderr = self.stderr.snapshot();
+        #[cfg(not(windows))]
+        let stderr = (0, 0, 0, 0);
+        #[cfg(windows)]
+        let (stderr_bytes, stderr_lines, stderr_truncated_lines, stderr_read_errors) = (
+            stderr.total_bytes,
+            stderr.total_lines,
+            stderr.truncated_lines,
+            stderr.read_errors,
+        );
+        #[cfg(not(windows))]
+        let (stderr_bytes, stderr_lines, stderr_truncated_lines, stderr_read_errors) = stderr;
+        RuntimeHealth {
+            state: self
+                .snapshot
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .state,
+            worker_running: self.worker_running.load(Ordering::Relaxed),
+            consecutive_failures: self.consecutive_failures.load(Ordering::Relaxed),
+            last_error: self
+                .last_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .clone(),
+            stderr_lines,
+            stderr_bytes,
+            stderr_truncated_lines,
+            stderr_read_errors,
+            process_containment: if cfg!(windows) {
+                RuntimeProcessContainment::WindowsJob
+            } else {
+                RuntimeProcessContainment::DirectChild
+            },
+        }
+    }
+
+    fn record_start_failure(&self, error: &RuntimeError) {
+        self.consecutive_failures.fetch_add(1, Ordering::Relaxed);
+        *self
+            .last_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.clone());
+    }
+
+    fn clear_failures(&self) {
+        self.consecutive_failures.store(0, Ordering::Relaxed);
+        *self
+            .last_error
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = None;
+    }
+
+    fn session_is_unavailable(&self, session_id: &str) -> bool {
+        let gate = self
+            .interaction_gate
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        gate.unavailable_sessions.contains(session_id)
+            || gate.closing_sessions.contains(session_id)
+            || gate.runtime_stopping
+    }
+
     fn allow_runtime_interactions(&self) {
         let mut gate = self
             .interaction_gate
@@ -821,6 +945,32 @@ impl RuntimeShared {
     }
 
     fn fail(&self, error: &RuntimeError) {
+        let previous = {
+            let snapshot = self
+                .snapshot
+                .read()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            snapshot.state
+        };
+        if previous == RuntimeState::Failed {
+            *self
+                .last_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.clone());
+            return;
+        }
+        let was_live = matches!(
+            previous,
+            RuntimeState::Ready | RuntimeState::Working | RuntimeState::WaitingForInput
+        );
+        if was_live {
+            self.record_start_failure(error);
+        } else {
+            *self
+                .last_error
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(error.clone());
+        }
         self.transition(RuntimeState::Failed);
         self.emit(RuntimeEvent::RuntimeFailed {
             diagnostic: error.diagnostic.clone(),
@@ -2055,6 +2205,7 @@ async fn run_worker(
 ) {
     #[cfg(windows)]
     let agent = WindowsAcpProcess::new(target.executable.clone())
+        .share_diagnostics(shared.stderr.clone())
         .args(target.arguments.clone())
         .envs(target.environment.clone());
     #[cfg(not(windows))]
@@ -2585,20 +2736,47 @@ async fn execute_command(
             let session_id = validate_session_id(session_id)?;
             let text = validate_prompt(text)?;
             shared.begin_prompt(&session_id)?;
-            let response = connection
+            let prompt = connection
                 .send_request(PromptRequest::new(
                     session_id.clone(),
                     vec![ContentBlock::Text(TextContent::new(text))],
                 ))
-                .block_task()
-                .await
-                .map_err(|_| {
-                    runtime_error(
-                        RuntimeErrorCode::ProtocolRequestFailed,
-                        "runtime rejected the prompt",
-                        true,
-                    )
-                });
+                .block_task();
+            tokio::pin!(prompt);
+            let response = loop {
+                tokio::select! {
+                    result = &mut prompt => {
+                        break result.map_err(|_| {
+                            runtime_error(
+                                RuntimeErrorCode::ProtocolRequestFailed,
+                                "runtime rejected the prompt",
+                                true,
+                            )
+                        });
+                    }
+                    _ = tokio::time::sleep(Duration::from_millis(50)) => {
+                        if shared.session_is_unavailable(&session_id) {
+                            match tokio::time::timeout(Duration::from_secs(1), &mut prompt).await {
+                                Ok(result) => {
+                                    break result.map_err(|_| {
+                                        runtime_error(
+                                            RuntimeErrorCode::ProtocolRequestFailed,
+                                            "runtime rejected the prompt",
+                                            true,
+                                        )
+                                    });
+                                }
+                                Err(_) => {
+                                    shared.end_prompt(&session_id, SessionState::Cancelled);
+                                    return Ok(RuntimeResponse::PromptCompleted {
+                                        stop_reason: RuntimePromptStopReason::Cancelled,
+                                    });
+                                }
+                            }
+                        }
+                    }
+                }
+            };
             let settlement = match &response {
                 Ok(result)
                     if matches!(

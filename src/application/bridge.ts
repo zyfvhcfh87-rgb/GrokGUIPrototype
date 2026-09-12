@@ -11,6 +11,7 @@ import {
   type PromptRequest,
   type PromptResult,
   type RecentWorkspaceList,
+  type RuntimeDiagnostics,
   type RuntimeSnapshot,
   type Session,
   type SessionPage,
@@ -21,6 +22,7 @@ import {
   type SetSessionModelRequest,
   type SetupStatus,
   type Workspace,
+  type WorkspaceChanges,
   type WorkspaceRequest,
 } from "./contract.ts";
 
@@ -50,6 +52,11 @@ export function createApplicationBridge(transport: ApplicationTransport) {
         APPLICATION_COMMANDS.removeRecentWorkspace,
         request,
       ),
+    inspectWorkspaceChanges: (request: WorkspaceRequest) =>
+      invoke<WorkspaceChanges, WorkspaceRequest>(
+        APPLICATION_COMMANDS.inspectWorkspaceChanges,
+        request,
+      ),
     openExternalUrl: (request: OpenExternalUrlRequest) =>
       invoke<Acknowledgement, OpenExternalUrlRequest>(
         APPLICATION_COMMANDS.openExternalUrl,
@@ -57,6 +64,8 @@ export function createApplicationBridge(transport: ApplicationTransport) {
       ),
     runtimeSnapshot: () =>
       transport.invoke<RuntimeSnapshot>(APPLICATION_COMMANDS.runtimeSnapshot),
+    runtimeDiagnostics: () =>
+      transport.invoke<RuntimeDiagnostics>(APPLICATION_COMMANDS.runtimeDiagnostics),
     startRuntime: () => transport.invoke<RuntimeSnapshot>(APPLICATION_COMMANDS.startRuntime),
     stopRuntime: () => transport.invoke<Acknowledgement>(APPLICATION_COMMANDS.stopRuntime),
     restartRuntime: () =>
