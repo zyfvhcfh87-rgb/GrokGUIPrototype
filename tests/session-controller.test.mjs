@@ -290,3 +290,136 @@ test("a newer runtime generation clears live selection then resumes the same ses
 
   assert.equal(controller.getState().selectedSessionId, "session-001");
 });
+
+test("loadMore appends unique workspace sessions from the next page", async () => {
+  const { controller, harness } = await readyController({
+    listSessions: (request) => {
+      if (request.cursor === "page-2") {
+        return {
+          sessions: [
+            summary("session-002", request.workspace),
+            summary("session-001", request.workspace),
+            summary("session-foreign", "C:\\other"),
+          ],
+          nextCursor: "page-3",
+          truncated: false,
+        };
+      }
+      return {
+        sessions: [summary("session-001", request.workspace)],
+        nextCursor: "page-2",
+        truncated: false,
+      };
+    },
+  });
+  await controller.setWorkspace({ path: "C:\\work" });
+  assert.equal(controller.getState().nextCursor, "page-2");
+  harness.calls.length = 0;
+
+  await controller.loadMore();
+
+  assert.deepEqual(harness.calls, [
+    { command: "list", request: { workspace: "C:\\work", cursor: "page-2" } },
+  ]);
+  assert.deepEqual(
+    controller.getState().sessions.map((item) => item.sessionId),
+    ["session-001", "session-002"],
+  );
+  assert.equal(controller.getState().nextCursor, "page-3");
+  assert.equal(controller.getState().loadingMore, false);
+});
+
+test("loadMore stops when the agent repeats the requested cursor", async () => {
+  const { controller, harness } = await readyController({
+    listSessions: (request) => {
+      if (request.cursor === "page-2") {
+        return {
+          sessions: [summary("session-002", request.workspace)],
+          nextCursor: "page-2",
+          truncated: false,
+        };
+      }
+      return {
+        sessions: [summary("session-001", request.workspace)],
+        nextCursor: "page-2",
+        truncated: false,
+      };
+    },
+  });
+  await controller.setWorkspace({ path: "C:\\work" });
+  harness.calls.length = 0;
+
+  await controller.loadMore();
+
+  assert.equal(controller.getState().nextCursor, null);
+  assert.equal(controller.getState().truncated, true);
+  assert.deepEqual(
+    controller.getState().sessions.map((item) => item.sessionId),
+    ["session-001"],
+  );
+  harness.calls.length = 0;
+  await controller.loadMore();
+  assert.deepEqual(harness.calls, []);
+});
+
+test("loadMore refuses to request the same cursor twice", async () => {
+  let pages = 0;
+  const { controller, harness } = await readyController({
+    listSessions: (request) => {
+      if (request.cursor === "page-2") {
+        pages += 1;
+        return {
+          sessions: [summary("session-002", request.workspace)],
+          nextCursor: "page-3",
+          truncated: false,
+        };
+      }
+      return {
+        sessions: [summary("session-001", request.workspace)],
+        nextCursor: "page-2",
+        truncated: false,
+      };
+    },
+  });
+  await controller.setWorkspace({ path: "C:\\work" });
+  await controller.loadMore();
+  assert.equal(pages, 1);
+  controller.getState().nextCursor = "page-2";
+  harness.calls.length = 0;
+
+  await controller.loadMore();
+
+  assert.equal(pages, 1);
+  assert.equal(controller.getState().nextCursor, null);
+  assert.deepEqual(harness.calls, []);
+});
+
+test("a failed loadMore keeps the cursor so the page can be retried", async () => {
+  const { controller } = await readyController({
+    listSessions: async (request) => {
+      if (request.cursor === "page-2") {
+        throw {
+          code: "protocol_request_failed",
+          diagnostic: "page two failed",
+          recoverable: true,
+        };
+      }
+      return {
+        sessions: [summary("session-001", request.workspace)],
+        nextCursor: "page-2",
+        truncated: false,
+      };
+    },
+  });
+  await controller.setWorkspace({ path: "C:\\work" });
+
+  await controller.loadMore();
+
+  assert.equal(controller.getState().nextCursor, "page-2");
+  assert.equal(controller.getState().loadingMore, false);
+  assert.equal(controller.getState().failure?.code, "protocol_request_failed");
+  assert.equal(
+    controller.getState().failure?.diagnostic,
+    "More sessions could not be loaded.",
+  );
+});

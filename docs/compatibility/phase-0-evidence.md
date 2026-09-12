@@ -132,3 +132,5 @@ Eleven compatibility sessions were created, closed, and left in Grok-owned persi
 - Installed-runtime elicitation and plan-update behavior remain unknown because no safe deterministic trigger was established. The fake covers permission allow-once/reject-once, form elicitation accept/cancel, plan replacement, and text cancellation. The remaining permission, elicitation, and cancellation permutations belong to the Phase 2 safety workflow.
 - The tested installed session list fit on one page, and close was exercised only while idle. Cursor pagination and close during an active turn remain Phase 2 lifecycle permutations.
 - Grok behavior for protocol-level `$/cancel_request` remains unknown. Phase 0 validates its exact spelling, framing, and bounded correlation only; it does not claim an installed-runtime behavior probe.
+
+Phase 2 classified these remaining items in [phase-2-safety-matrix.md](phase-2-safety-matrix.md) without rewriting the observations above.

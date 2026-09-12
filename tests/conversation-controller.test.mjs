@@ -305,6 +305,32 @@ test("cancel rejection and timeout surface the failure without leaving a fake ca
   assert.equal(timedOut.controller.getState().cancelling, false);
 });
 
+test("closing a session during sendPrompt clears sending before the prompt settles", async () => {
+  const { promise, resolve } = Promise.withResolvers();
+  const { controller, harness } = await readyController({
+    sendPrompt: () => promise,
+  });
+  harness.emit({
+    generation: 1,
+    sequence: 1,
+    event: { type: "session_activated", sessionId: "session-1" },
+  });
+  controller.setDraft("hello");
+  const sending = controller.sendPrompt();
+  assert.equal(controller.getState().sending, true);
+
+  harness.emit({
+    generation: 1,
+    sequence: 2,
+    event: { type: "session_state_changed", sessionId: "session-1", state: "closed" },
+  });
+  assert.equal(controller.getState().sending, false);
+
+  resolve({ stopReason: "cancelled" });
+  assert.deepEqual(await sending, { stopReason: "cancelled" });
+  assert.equal(controller.getState().sending, false);
+});
+
 test("process loss during cancellation fails the conversation instead of restoring the turn", async () => {
   const { controller, harness } = await workingController();
   const pending = controller.cancelPrompt();

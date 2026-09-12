@@ -46,6 +46,7 @@ export type SessionControllerState = {
   creating: boolean;
   opening: boolean;
   closing: boolean;
+  loadingMore: boolean;
 };
 
 const INITIAL_STATE: SessionControllerState = {
@@ -62,6 +63,7 @@ const INITIAL_STATE: SessionControllerState = {
   creating: false,
   opening: false,
   closing: false,
+  loadingMore: false,
 };
 
 export function createSessionController(bridge: SessionControllerBridge) {
@@ -75,6 +77,7 @@ export function createSessionController(bridge: SessionControllerBridge) {
   const failedIds = new Set<string>();
   const listeners = new Set<(state: SessionControllerState) => void>();
   let restoreListedSession = (_sessions: SessionRow[]): void => {};
+  let lastCursorRequested: string | null = null;
 
   const publish = (patch: Partial<SessionControllerState>) => {
     state = { ...state, ...patch };
@@ -141,12 +144,13 @@ export function createSessionController(bridge: SessionControllerBridge) {
     if (workspace === null) {
       return;
     }
-    publish({ listKind: "loading", failure: null });
+    publish({ listKind: "loading", failure: null, loadingMore: false });
     try {
       const page = await bridge.listSessions({ workspace, cursor: null });
       if (token !== listToken || state.workspace !== workspace) {
         return;
       }
+      lastCursorRequested = null;
       const scoped = page.sessions
         .filter((session) => sessionBelongsToWorkspace(session, workspace))
         .map((session) => ({ ...session, status: "listed" as const }));
@@ -393,6 +397,7 @@ export function createSessionController(bridge: SessionControllerBridge) {
       closedIds.clear();
       failedIds.clear();
       pendingRestoreId = restoreId;
+      lastCursorRequested = null;
       publish({
         workspace: path,
         sessions: [],
@@ -404,6 +409,7 @@ export function createSessionController(bridge: SessionControllerBridge) {
         creating: false,
         opening: false,
         closing: false,
+        loadingMore: false,
         listKind: path === null ? "idle" : nextCanList ? "loading" : "unavailable",
       });
       if (nextCanList) {
@@ -412,6 +418,58 @@ export function createSessionController(bridge: SessionControllerBridge) {
     },
     refresh: async () => {
       await refreshList(++listToken);
+    },
+    loadMore: async () => {
+      if (!canList() || state.loadingMore) {
+        return;
+      }
+      const workspace = state.workspace;
+      const cursor = state.nextCursor;
+      if (workspace === null || cursor === null) {
+        return;
+      }
+      if (cursor === lastCursorRequested) {
+        publish({ nextCursor: null });
+        return;
+      }
+      const token = listToken;
+      lastCursorRequested = cursor;
+      publish({ loadingMore: true, failure: null });
+      try {
+        const page = await bridge.listSessions({ workspace, cursor });
+        if (token !== listToken || state.workspace !== workspace) {
+          return;
+        }
+        if (page.nextCursor === cursor) {
+          publish({
+            loadingMore: false,
+            nextCursor: null,
+            truncated: true,
+          });
+          return;
+        }
+        const existing = new Set(state.sessions.map((session) => session.sessionId));
+        const appended = page.sessions
+          .filter((session) => sessionBelongsToWorkspace(session, workspace))
+          .filter((session) => !existing.has(session.sessionId))
+          .map((session) => ({ ...session, status: "listed" as const }));
+        applyRows([...state.sessions, ...appended], {
+          loadingMore: false,
+          listKind: state.sessions.length + appended.length === 0 ? "empty" : "ready",
+          nextCursor: page.nextCursor,
+          truncated: state.truncated || page.truncated,
+          failure: null,
+        });
+      } catch (error) {
+        if (token !== listToken || state.workspace !== workspace) {
+          return;
+        }
+        lastCursorRequested = null;
+        publish({
+          loadingMore: false,
+          failure: applicationError(error, "More sessions could not be loaded."),
+        });
+      }
     },
     createSession: async () => {
       const workspace = requireWorkspace();

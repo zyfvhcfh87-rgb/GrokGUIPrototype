@@ -170,6 +170,7 @@ export function App({
     listKind: sessionState.listKind,
     sessionCount: sessionState.sessions.length,
     failure: sessionState.failure,
+    nextCursor: sessionState.nextCursor,
   });
   const agent = state.capabilities?.agent;
   const authMethods = state.capabilities?.authenticationMethods ?? [];
@@ -434,6 +435,16 @@ export function App({
                     </li>
                   ))}
                 </ul>
+              ) : null}
+              {sessionList.canLoadMore ? (
+                <button
+                  className="button button--wide"
+                  type="button"
+                  disabled={sessionState.loadingMore}
+                  onClick={() => void sessions.loadMore()}
+                >
+                  {sessionState.loadingMore ? "Loading more…" : "Load more"}
+                </button>
               ) : null}
             </section>
           ) : null}
