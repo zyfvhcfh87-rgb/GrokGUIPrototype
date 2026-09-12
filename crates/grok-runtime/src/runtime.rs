@@ -91,6 +91,7 @@ struct RuntimeShared {
     session_workspaces: StdMutex<HashMap<String, PathBuf>>,
     worker_running: AtomicBool,
     stop_epoch: AtomicU64,
+    stop_in_progress: AtomicU32,
     consecutive_failures: AtomicU32,
     last_error: StdMutex<Option<RuntimeError>>,
     #[cfg(windows)]
@@ -579,6 +580,7 @@ impl GrokRuntime {
                 session_workspaces: StdMutex::new(HashMap::new()),
                 worker_running: AtomicBool::new(false),
                 stop_epoch: AtomicU64::new(0),
+                stop_in_progress: AtomicU32::new(0),
                 consecutive_failures: AtomicU32::new(0),
                 last_error: StdMutex::new(None),
                 #[cfg(windows)]
@@ -611,6 +613,9 @@ impl GrokRuntime {
 
     pub async fn start(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         let _operation = self.operation.lock().await;
+        if self.stop_is_in_progress() {
+            return Err(start_interrupted_error());
+        }
 
         {
             let mut worker = self.worker.lock().await;
@@ -624,44 +629,29 @@ impl GrokRuntime {
             }
         }
         let epoch = self.shared.stop_epoch.load(Ordering::SeqCst);
-        match self.start_inner(epoch).await {
-            Ok(snapshot) => {
-                self.shared.clear_failures();
-                Ok(snapshot)
-            }
-            Err(error) => {
-                self.shared.record_start_failure(&error);
-                self.shared.fail(&error);
-                Err(error)
-            }
-        }
+        self.finish_start(epoch).await
     }
 
     pub async fn stop(&self) -> Result<(), RuntimeError> {
+        self.shared.stop_in_progress.fetch_add(1, Ordering::SeqCst);
         self.shared.stop_epoch.fetch_add(1, Ordering::SeqCst);
         self.shutdown_current_worker().await;
-        match tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, self.operation.lock()).await {
-            Ok(_operation) => self.stop_inner().await,
-            Err(_) => self.shutdown_current_worker().await,
-        }
+        let _operation =
+            tokio::time::timeout(GRACEFUL_SHUTDOWN_TIMEOUT, self.operation.lock()).await;
+        self.shutdown_current_worker().await;
+        self.stop_inner().await;
+        self.shared.stop_in_progress.fetch_sub(1, Ordering::SeqCst);
         Ok(())
     }
 
     pub async fn restart(&self) -> Result<RuntimeSnapshot, RuntimeError> {
         let _operation = self.operation.lock().await;
         self.stop_inner().await;
-        let epoch = self.shared.stop_epoch.load(Ordering::SeqCst);
-        match self.start_inner(epoch).await {
-            Ok(snapshot) => {
-                self.shared.clear_failures();
-                Ok(snapshot)
-            }
-            Err(error) => {
-                self.shared.record_start_failure(&error);
-                self.shared.fail(&error);
-                Err(error)
-            }
+        if self.stop_is_in_progress() {
+            return Err(start_interrupted_error());
         }
+        let epoch = self.shared.stop_epoch.load(Ordering::SeqCst);
+        self.finish_start(epoch).await
     }
 
     pub async fn execute(&self, command: RuntimeCommand) -> Result<RuntimeResponse, RuntimeError> {
@@ -798,7 +788,7 @@ impl GrokRuntime {
     }
 
     async fn start_inner(&self, epoch: u64) -> Result<RuntimeSnapshot, RuntimeError> {
-        if self.shared.stop_epoch.load(Ordering::SeqCst) != epoch {
+        if self.start_was_interrupted(epoch) {
             return Err(start_interrupted_error());
         }
         self.shared.allow_runtime_interactions();
@@ -812,7 +802,7 @@ impl GrokRuntime {
         });
         self.shared.worker_running.store(true, Ordering::Relaxed);
         *self.worker.lock().await = Some(RuntimeWorker { commands, task });
-        if self.shared.stop_epoch.load(Ordering::SeqCst) != epoch {
+        if self.start_was_interrupted(epoch) {
             self.shutdown_current_worker().await;
             return Err(start_interrupted_error());
         }
@@ -824,10 +814,45 @@ impl GrokRuntime {
                 true,
             )),
         };
+        if self.start_was_interrupted(epoch) {
+            self.shutdown_current_worker().await;
+            return Err(start_interrupted_error());
+        }
         if result.is_err() {
             self.shutdown_current_worker().await;
         }
         result
+    }
+
+    async fn finish_start(&self, epoch: u64) -> Result<RuntimeSnapshot, RuntimeError> {
+        match self.start_inner(epoch).await {
+            Ok(snapshot) => {
+                if self.start_was_interrupted(epoch) {
+                    self.shutdown_current_worker().await;
+                    Err(start_interrupted_error())
+                } else {
+                    self.shared.clear_failures();
+                    Ok(snapshot)
+                }
+            }
+            Err(error) => {
+                if self.start_was_interrupted(epoch) {
+                    Err(start_interrupted_error())
+                } else {
+                    self.shared.record_start_failure(&error);
+                    self.shared.fail(&error);
+                    Err(error)
+                }
+            }
+        }
+    }
+
+    fn stop_is_in_progress(&self) -> bool {
+        self.shared.stop_in_progress.load(Ordering::SeqCst) != 0
+    }
+
+    fn start_was_interrupted(&self, epoch: u64) -> bool {
+        self.shared.stop_epoch.load(Ordering::SeqCst) != epoch || self.stop_is_in_progress()
     }
 
     async fn stop_inner(&self) {

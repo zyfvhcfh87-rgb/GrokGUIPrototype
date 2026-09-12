@@ -177,8 +177,17 @@ export function createPresentationController(bridge: PresentationBridge) {
     }
   };
 
-  const persistPatch = (patch: PresentationPatchInput): Promise<PresentationPreferences> => {
-    const job = writeChain.then(async () => {
+  const enqueue = <T,>(work: () => Promise<T>): Promise<T> => {
+    const job = writeChain.then(work);
+    writeChain = job.then(
+      () => undefined,
+      () => undefined,
+    );
+    return job;
+  };
+
+  const persistPatch = (patch: PresentationPatchInput): Promise<PresentationPreferences> =>
+    enqueue(async () => {
       const current = state.preferences;
       const resolved = typeof patch === "function" ? patch(current) : patch;
       const next = mergePresentationPatch(current, resolved);
@@ -187,11 +196,14 @@ export function createPresentationController(bridge: PresentationBridge) {
       }
       return persist(next);
     });
-    writeChain = job.then(
-      () => undefined,
-      () => undefined,
-    );
-    return job;
+
+  const attachMediaListeners = () => {
+    themeMedia?.removeEventListener("change", refreshResolved);
+    motionMedia?.removeEventListener("change", refreshResolved);
+    themeMedia = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
+    motionMedia = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
+    themeMedia?.addEventListener("change", refreshResolved);
+    motionMedia?.addEventListener("change", refreshResolved);
   };
 
   return {
@@ -203,23 +215,24 @@ export function createPresentationController(bridge: PresentationBridge) {
       };
     },
     initialize: async () => {
-      try {
-        const loaded = sanitizePresentationPreferences(
-          await bridge.getPresentationPreferences(),
-        );
-        apply(loaded, null);
-      } catch (error) {
-        apply(
-          DEFAULT_PRESENTATION_PREFERENCES,
-          applicationError(error, "Appearance preferences could not be loaded."),
-        );
-      }
-      themeMedia?.removeEventListener("change", refreshResolved);
-      motionMedia?.removeEventListener("change", refreshResolved);
-      themeMedia = globalThis.matchMedia?.("(prefers-color-scheme: dark)");
-      motionMedia = globalThis.matchMedia?.("(prefers-reduced-motion: reduce)");
-      themeMedia?.addEventListener("change", refreshResolved);
-      motionMedia?.addEventListener("change", refreshResolved);
+      await enqueue(async () => {
+        try {
+          const loaded = sanitizePresentationPreferences(
+            await bridge.getPresentationPreferences(),
+          );
+          if (!state.loaded) {
+            apply(loaded, null);
+          }
+        } catch (error) {
+          if (!state.loaded) {
+            apply(
+              DEFAULT_PRESENTATION_PREFERENCES,
+              applicationError(error, "Appearance preferences could not be loaded."),
+            );
+          }
+        }
+      });
+      attachMediaListeners();
     },
     update: persistPatch,
     setOnboarding: (onboarding: OnboardingStatus) => persistPatch({ onboarding }),

@@ -142,6 +142,7 @@ async fn stop_during_hung_initialize_does_not_wait_for_ready() {
         "stop must interrupt initialize instead of letting it finish"
     );
     assert!(!runtime.health().worker_running);
+    assert_eq!(runtime.snapshot().state, RuntimeState::Disconnected);
 }
 
 #[tokio::test]

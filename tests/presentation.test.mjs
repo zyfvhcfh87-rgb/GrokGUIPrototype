@@ -127,3 +127,50 @@ test("dialog focus trap is mounted once so live updates do not steal focus", asy
   assert.match(source, /onCloseRef\.current = onClose/u);
   assert.doesNotMatch(source, /\}, \[onClose\]\);/u);
 });
+
+test("initialize cannot clobber a patch already on the write chain", async () => {
+  let stored = { ...DEFAULT_PRESENTATION_PREFERENCES, theme: "dark" };
+  let releaseLoad;
+  const loadGate = new Promise((resolve) => {
+    releaseLoad = resolve;
+  });
+  const controller = createPresentationController({
+    getPresentationPreferences: async () => {
+      await loadGate;
+      return { ...stored };
+    },
+    setPresentationPreferences: async (request) => {
+      stored = { ...request };
+      return stored;
+    },
+  });
+  const patched = controller.update({ projectsOpen: false });
+  const initializing = controller.initialize();
+  releaseLoad();
+  await Promise.all([patched, initializing]);
+  assert.equal(controller.getState().preferences.projectsOpen, false);
+});
+
+test("a delayed initialize load does not overwrite a later queued patch", async () => {
+  let stored = { ...DEFAULT_PRESENTATION_PREFERENCES, theme: "light" };
+  let releaseLoad;
+  const loadGate = new Promise((resolve) => {
+    releaseLoad = resolve;
+  });
+  const controller = createPresentationController({
+    getPresentationPreferences: async () => {
+      await loadGate;
+      return { ...stored, projectsOpen: true };
+    },
+    setPresentationPreferences: async (request) => {
+      stored = { ...request };
+      return stored;
+    },
+  });
+  const initializing = controller.initialize();
+  const patched = controller.update({ projectsOpen: false });
+  releaseLoad();
+  await Promise.all([initializing, patched]);
+  assert.equal(controller.getState().preferences.theme, "light");
+  assert.equal(controller.getState().preferences.projectsOpen, false);
+});
