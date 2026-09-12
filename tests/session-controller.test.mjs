@@ -418,8 +418,6 @@ test("a failed loadMore keeps the cursor so the page can be retried", async () =
   assert.equal(controller.getState().nextCursor, "page-2");
   assert.equal(controller.getState().loadingMore, false);
   assert.equal(controller.getState().failure?.code, "protocol_request_failed");
-  assert.equal(
-    controller.getState().failure?.diagnostic,
-    "More sessions could not be loaded.",
-  );
+  assert.equal(controller.getState().failure?.diagnostic, "page two failed");
+  assert.equal(controller.getState().failure?.recoverable, true);
 });

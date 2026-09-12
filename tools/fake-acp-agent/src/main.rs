@@ -417,6 +417,9 @@ fn run_lifecycle(
                 )?;
                 if crash_after_new {
                     eprintln!("fake-acp-agent: deterministic post-session crash fixture");
+                    // Keep the child alive long enough for the client to read
+                    // the session/new result before stdout closes with the process.
+                    thread::sleep(Duration::from_millis(50));
                     std::process::exit(86);
                 }
             }

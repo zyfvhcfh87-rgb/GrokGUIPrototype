@@ -37,7 +37,7 @@ Permission and elicitation UI contracts remain those recorded in [phase-2-intera
 
 ## Verification recorded with this successor
 
-Commands for this Linux checkout (no Grok binary):
+Commands run on 2026-09-12 in this Linux checkout (no Grok binary):
 
 ```text
 cargo fmt --all
@@ -46,5 +46,9 @@ cargo test -p grok-runtime --locked --no-fail-fast
 NODE_OPTIONS='--experimental-strip-types' npm test
 npm run check
 ```
+
+Results: fake-acp-agent contract/runtime/sdk tests passed, including pagination, hung-turn cancel/close, crash-after-new recovery, and crash-during-prompt. grok-runtime: 120 passed. Frontend: session Load more, repeated-cursor, and close-during-send contracts plus existing permission/elicitation/cancel tests. Typecheck passed.
+
+The crash-after-new fixture now waits briefly after writing `session/new` so the client can read the result before the child exits. That race was already failing on Linux in the #15 revision.
 
 Sanitized capability snapshot for live Windows remains the Phase 0 initialize shape: ACP v1, `loadSession`, list/resume/close, advertised auth IDs `xai.api_key`, `cached_token`, and `grok.com`. No credentials or private workspace contents are recorded here.
