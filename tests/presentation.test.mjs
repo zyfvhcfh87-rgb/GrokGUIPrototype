@@ -125,5 +125,5 @@ test("app presentation writes are patches instead of full snapshots", async () =
 test("dialog focus trap is mounted once so live updates do not steal focus", async () => {
   const source = await readFile(new URL("../src/cockpit/Dialog.tsx", import.meta.url), "utf8");
   assert.match(source, /onCloseRef\.current = onClose/u);
-  assert.doesNotMatch(source, /}, \[onClose\]\);/u);
+  assert.doesNotMatch(source, /\}, \[onClose\]\);/u);
 });
