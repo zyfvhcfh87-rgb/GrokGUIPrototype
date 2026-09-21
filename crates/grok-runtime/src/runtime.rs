@@ -34,7 +34,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value};
 use thiserror::Error;
 use tokio::{
-    sync::{Mutex, broadcast, mpsc, oneshot},
+    sync::{Mutex, Notify, broadcast, mpsc, oneshot},
     task::JoinHandle,
 };
 
@@ -85,6 +85,7 @@ struct RuntimeShared {
     pending_permissions: StdMutex<HashMap<String, PendingPermission>>,
     pending_elicitations: StdMutex<HashMap<String, PendingElicitation>>,
     interaction_gate: StdMutex<InteractionGateState>,
+    prompt_unavailable: Notify,
     tool_calls: StdMutex<HashMap<(String, String), ToolPresentation>>,
     active_prompts: RwLock<BTreeSet<String>>,
     session_controls: StdMutex<HashMap<String, RuntimeSessionControls>>,
@@ -574,6 +575,7 @@ impl GrokRuntime {
                 pending_permissions: StdMutex::new(HashMap::new()),
                 pending_elicitations: StdMutex::new(HashMap::new()),
                 interaction_gate: StdMutex::new(InteractionGateState::default()),
+                prompt_unavailable: Notify::new(),
                 tool_calls: StdMutex::new(HashMap::new()),
                 active_prompts: RwLock::new(BTreeSet::new()),
                 session_controls: StdMutex::new(HashMap::new()),
@@ -1595,6 +1597,7 @@ impl RuntimeShared {
         gate.closing_sessions.remove(session_id);
         gate.unavailable_sessions.insert(session_id.to_owned());
         drop(gate);
+        self.prompt_unavailable.notify_waiters();
         self.session_state(session_id, state);
     }
 
@@ -1613,6 +1616,8 @@ impl RuntimeShared {
             ));
         }
         gate.closing_sessions.insert(session_id.to_owned());
+        drop(gate);
+        self.prompt_unavailable.notify_waiters();
         Ok(())
     }
 
@@ -1782,6 +1787,7 @@ impl RuntimeShared {
             .collect::<Vec<_>>();
         self.emit(RuntimeEvent::InteractionsCleared { session_id: None });
         drop(gate);
+        self.prompt_unavailable.notify_waiters();
         for pending in permissions {
             let _ = pending.response.send(RequestPermissionResponse::new(
                 RequestPermissionOutcome::Cancelled,
@@ -2793,7 +2799,30 @@ async fn execute_command(
                 .block_task();
             tokio::pin!(prompt);
             let response = loop {
+                let notified = shared.prompt_unavailable.notified();
+                tokio::pin!(notified);
+                notified.as_mut().enable();
+                if shared.session_is_unavailable(&session_id) {
+                    match tokio::time::timeout(Duration::from_secs(1), &mut prompt).await {
+                        Ok(result) => {
+                            break result.map_err(|_| {
+                                runtime_error(
+                                    RuntimeErrorCode::ProtocolRequestFailed,
+                                    "runtime rejected the prompt",
+                                    true,
+                                )
+                            });
+                        }
+                        Err(_) => {
+                            shared.end_prompt(&session_id, SessionState::Cancelled);
+                            return Ok(RuntimeResponse::PromptCompleted {
+                                stop_reason: RuntimePromptStopReason::Cancelled,
+                            });
+                        }
+                    }
+                }
                 tokio::select! {
+                    biased;
                     result = &mut prompt => {
                         break result.map_err(|_| {
                             runtime_error(
@@ -2803,27 +2832,7 @@ async fn execute_command(
                             )
                         });
                     }
-                    _ = tokio::time::sleep(Duration::from_millis(50)) => {
-                        if shared.session_is_unavailable(&session_id) {
-                            match tokio::time::timeout(Duration::from_secs(1), &mut prompt).await {
-                                Ok(result) => {
-                                    break result.map_err(|_| {
-                                        runtime_error(
-                                            RuntimeErrorCode::ProtocolRequestFailed,
-                                            "runtime rejected the prompt",
-                                            true,
-                                        )
-                                    });
-                                }
-                                Err(_) => {
-                                    shared.end_prompt(&session_id, SessionState::Cancelled);
-                                    return Ok(RuntimeResponse::PromptCompleted {
-                                        stop_reason: RuntimePromptStopReason::Cancelled,
-                                    });
-                                }
-                            }
-                        }
-                    }
+                    _ = &mut notified => {}
                 }
             };
             let settlement = match &response {

@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { createConversationController } from "../src/application/conversation-controller.ts";
 import { createSetupController } from "../src/application/setup-controller.ts";
+import { createApplicationStore } from "../src/application/state.ts";
 
 const setup = {
   runtimeAvailable: true,
@@ -16,6 +18,55 @@ const snapshot = {
   state: "disconnected",
   capabilities: null,
 };
+
+test("setup and conversation share one application store", async () => {
+  const store = createApplicationStore();
+  const listeners = [];
+  const bridge = {
+    onEvent: async (next) => {
+      listeners.push(next);
+      return () => {
+        const index = listeners.indexOf(next);
+        if (index !== -1) {
+          listeners.splice(index, 1);
+        }
+      };
+    },
+    setupStatus: async () => setup,
+    listRecentWorkspaces: async () => ({ workspaces: [] }),
+    runtimeSnapshot: async () => ({ ...snapshot, generation: 1, lastSequence: 1, state: "ready" }),
+    sendPrompt: async () => ({ stopReason: "end_turn" }),
+    cancelPrompt: async () => ({ acknowledged: true }),
+    setSessionMode: async () => ({ acknowledged: true }),
+    setSessionModel: async () => ({ acknowledged: true }),
+    setSessionConfig: async () => ({ acknowledged: true }),
+  };
+  const setupController = createSetupController(bridge, store);
+  const conversation = createConversationController(bridge, store);
+  await setupController.initialize();
+  await conversation.initialize();
+
+  const chunk = {
+    generation: 1,
+    sequence: 2,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "Hello",
+      truncated: false,
+    },
+  };
+  listeners[0]?.(chunk);
+  assert.equal(store.getState().lastSequence, 1);
+  assert.equal(store.getState().sessions["session-1"], undefined);
+
+  listeners[1]?.(chunk);
+  assert.equal(store.getState().lastSequence, 2);
+  assert.equal(store.getState().sessions["session-1"].messages["assistant:assistant-1"].parts[0], "Hello");
+  assert.equal(setupController.getState().runtimeState, "ready");
+  assert.equal(conversation.getState().application, store.getState());
+});
 
 test("setup controller subscribes before it inspects and starts the runtime", async () => {
   const calls = [];

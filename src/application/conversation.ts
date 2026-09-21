@@ -16,11 +16,12 @@ import type {
 } from "./contract.ts";
 import { advertisedPlanReview } from "./plan-review.ts";
 import { isRuntimeUsable } from "./sessions.ts";
-import type {
-  ApplicationState,
-  SessionViewState,
-  StreamChunk,
-  ToolCallState,
+import {
+  streamChunkText,
+  type ApplicationState,
+  type SessionViewState,
+  type StreamChunk,
+  type ToolCallState,
 } from "./state.ts";
 
 export const MAX_TERMINAL_DISPLAY_CHARS = 8 * 1024;
@@ -433,7 +434,7 @@ export function projectConversationCards(input: {
         cards.push({
           type: item.kind,
           id: chunk.id,
-          text: chunk.text,
+          text: streamChunkText(chunk),
           truncated: chunk.truncated,
         });
         continue;
@@ -446,7 +447,7 @@ export function projectConversationCards(input: {
         cards.push({
           type: "thought",
           id: chunk.id,
-          text: chunk.text,
+          text: streamChunkText(chunk),
           truncated: chunk.truncated,
         });
         continue;
@@ -462,13 +463,14 @@ export function projectConversationCards(input: {
     cards.filter((card) => card.type === "user_message").map((card) => card.text),
   );
   for (const pending of input.pendingUserMessages) {
-    if (seenUserText.has(pending.text)) {
+    const text = streamChunkText(pending);
+    if (seenUserText.has(text)) {
       continue;
     }
     cards.push({
       type: "user_message",
       id: pending.id,
-      text: pending.text,
+      text,
       truncated: pending.truncated,
     });
   }

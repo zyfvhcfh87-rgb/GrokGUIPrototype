@@ -1,6 +1,6 @@
-import { useRef } from "react";
+import { useEffect, useRef } from "react";
 
-import { clampPanelWidth } from "../application/presentation.ts";
+import { clampPanelWidth, createPanelWidthWriter } from "../application/presentation.ts";
 
 export function PanelResize({
   label,
@@ -17,6 +17,20 @@ export function PanelResize({
 }) {
   const origin = useRef({ x: 0, width: value });
   const live = useRef(value);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  const writer = useRef(createPanelWidthWriter((next) => onChangeRef.current(next)));
+
+  useEffect(() => {
+    live.current = value;
+  }, [value]);
+
+  useEffect(() => {
+    const current = writer.current;
+    return () => {
+      current.dispose();
+    };
+  }, []);
 
   const preview = (next: number, node: HTMLElement) => {
     live.current = next;
@@ -36,8 +50,7 @@ export function PanelResize({
       tabIndex={0}
       onPointerDown={(event) => {
         const handle = event.currentTarget;
-        origin.current = { x: event.clientX, width: value };
-        live.current = value;
+        origin.current = { x: event.clientX, width: live.current };
         const handleMove = (move: PointerEvent) => {
           const delta = move.clientX - origin.current.x;
           const next = invert ? origin.current.width - delta : origin.current.width + delta;
@@ -46,27 +59,33 @@ export function PanelResize({
         const handleUp = () => {
           window.removeEventListener("pointermove", handleMove);
           window.removeEventListener("pointerup", handleUp);
-          onChange(live.current);
+          writer.current.writePointer(live.current);
         };
         window.addEventListener("pointermove", handleMove);
         window.addEventListener("pointerup", handleUp);
       }}
       onKeyDown={(event) => {
-        if (event.key === "ArrowLeft") {
+        const handle = event.currentTarget;
+        const step = (delta: number) => {
           event.preventDefault();
-          onChange(clampPanelWidth(value + (invert ? 16 : -16)));
+          preview(clampPanelWidth(live.current + delta), handle);
+          writer.current.writeKeyboard(live.current);
+        };
+        if (event.key === "ArrowLeft") {
+          step(invert ? 16 : -16);
         }
         if (event.key === "ArrowRight") {
-          event.preventDefault();
-          onChange(clampPanelWidth(value + (invert ? -16 : 16)));
+          step(invert ? -16 : 16);
         }
         if (event.key === "Home") {
           event.preventDefault();
-          onChange(200);
+          preview(200, handle);
+          writer.current.writeKeyboard(200);
         }
         if (event.key === "End") {
           event.preventDefault();
-          onChange(420);
+          preview(420, handle);
+          writer.current.writeKeyboard(420);
         }
       }}
     />

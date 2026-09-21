@@ -5,6 +5,7 @@ import {
   createApplicationStore,
   initialApplicationState,
   reduceApplicationEvent,
+  streamChunkText,
 } from "../src/application/state.ts";
 
 const runtimeEvent = (generation, sequence, state) => ({
@@ -118,6 +119,52 @@ test("a newer runtime generation atomically clears sessions and rejects old even
   assert.equal(state.generation, 2);
   assert.equal(state.runtime.state, "connecting");
   assert.deepEqual(state.sessions, {});
+});
+
+test("a same-generation snapshot does not skip events that are still in flight", () => {
+  const store = createApplicationStore();
+  store.dispatch(runtimeEvent(1, 1, "ready"));
+  store.adoptAuthoritativeSnapshot({
+    generation: 1,
+    lastSequence: 4,
+    state: "working",
+  });
+
+  assert.equal(store.getState().lastSequence, 1);
+  assert.equal(store.getState().runtime.state, "ready");
+
+  store.dispatch({
+    generation: 1,
+    sequence: 2,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "still here",
+      truncated: false,
+    },
+  });
+
+  assert.equal(store.getState().lastSequence, 2);
+  assert.equal(
+    streamChunkText(store.getState().sessions["session-1"].messages["assistant:assistant-1"]),
+    "still here",
+  );
+});
+
+test("in-order events apply without copying the pending map", () => {
+  const initial = reduceApplicationEvent(
+    initialApplicationState(),
+    runtimeEvent(1, 1, "connecting"),
+  );
+  const next = reduceApplicationEvent(initial, runtimeEvent(1, 2, "authenticating"));
+  const after = reduceApplicationEvent(next, runtimeEvent(1, 3, "ready"));
+
+  assert.equal(next.pendingEvents, initial.pendingEvents);
+  assert.equal(after.pendingEvents, initial.pendingEvents);
+  assert.equal(after.pendingEventCount, 0);
+  assert.equal(after.runtime.state, "ready");
+  assert.equal(after.lastSequence, 3);
 });
 
 test("the store publishes deterministic state changes and ignores duplicates", () => {
@@ -408,9 +455,9 @@ test("every structured application event updates its owned view state", () => {
   );
   const session = state.sessions["session-1"];
 
-  assert.equal(session.messages["user:user-1"].text, "hello");
-  assert.equal(session.messages["assistant:assistant-1"].text, "hi");
-  assert.equal(session.thoughts["thought-1"].text, "checking");
+  assert.equal(streamChunkText(session.messages["user:user-1"]), "hello");
+  assert.equal(streamChunkText(session.messages["assistant:assistant-1"]), "hi");
+  assert.equal(streamChunkText(session.thoughts["thought-1"]), "checking");
   assert.equal(session.toolCalls["tool-1"].status, "running");
   assert.deepEqual(session.timeline, [
     { kind: "user_message", id: "user:user-1" },
@@ -485,8 +532,10 @@ test("message and thought chunks append without duplicating timeline items", () 
   });
 
   const session = state.sessions["session-1"];
-  assert.equal(session.messages["assistant:assistant-1"].text, "Hello");
-  assert.equal(session.thoughts["thought-1"].text, "one two");
+  assert.deepEqual(session.messages["assistant:assistant-1"].parts, ["Hel", "lo"]);
+  assert.equal(streamChunkText(session.messages["assistant:assistant-1"]), "Hello");
+  assert.deepEqual(session.thoughts["thought-1"].parts, ["one ", "two"]);
+  assert.equal(streamChunkText(session.thoughts["thought-1"]), "one two");
   assert.equal(session.thoughts["thought-1"].truncated, true);
   assert.deepEqual(
     session.timeline.filter((item) => item.kind !== "tool"),
@@ -645,9 +694,12 @@ test("late stream events cannot resurrect a cancelled turn or another session", 
 
   const session = state.sessions["session-1"];
   assert.equal(session.state, "closed");
-  assert.equal(session.messages["assistant:wind-down"].text, "final");
+  assert.deepEqual(session.messages, {});
+  assert.deepEqual(session.thoughts, {});
+  assert.deepEqual(session.timeline, []);
+  assert.deepEqual(session.toolCalls, {});
   assert.equal(session.plan[0].title, "Saved");
-  assert.equal(state.sessions["session-2"].messages["assistant:other"].text, "wrong session");
+  assert.equal(streamChunkText(state.sessions["session-2"].messages["assistant:other"]), "wrong session");
 });
 
 test("runtime failure during cancellation leaves the conversation unrestored", () => {

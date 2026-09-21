@@ -108,14 +108,38 @@ impl RuntimeManager {
 }
 
 struct WorkspaceManager {
-    store: std::sync::Mutex<WorkspaceStore>,
+    store: Arc<std::sync::Mutex<WorkspaceStore>>,
 }
 
 impl WorkspaceManager {
     fn new(storage_path: PathBuf) -> Self {
         Self {
-            store: std::sync::Mutex::new(WorkspaceStore::open(storage_path)),
+            store: Arc::new(std::sync::Mutex::new(WorkspaceStore::open(storage_path))),
         }
+    }
+
+    async fn recent_refreshed(&self) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
+        let paths = {
+            let store = self
+                .store
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            store.paths()
+        };
+        let probed =
+            tokio::task::spawn_blocking(move || WorkspaceStore::probe_availability(&paths))
+                .await
+                .map_err(|_| {
+                    ApplicationErrorDto::from(
+                        crate::workspace::WorkspaceError::PreferencesUnavailable,
+                    )
+                })?;
+        let mut store = self
+            .store
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        store.apply_availability(&probed);
+        RecentWorkspaceListDto::from_recent(store.recent().map_err(ApplicationErrorDto::from)?)
     }
 
     fn select(&self, path: PathBuf) -> Result<WorkspaceDto, ApplicationErrorDto> {
@@ -126,16 +150,6 @@ impl WorkspaceManager {
             .select(&path)
             .map_err(ApplicationErrorDto::from)?;
         WorkspaceDto::from_canonical_path(canonical)
-    }
-
-    fn recent(&self) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
-        let recent = self
-            .store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .recent()
-            .map_err(ApplicationErrorDto::from)?;
-        RecentWorkspaceListDto::from_recent(recent)
     }
 
     fn remove(&self, path: PathBuf) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
@@ -163,13 +177,13 @@ impl WorkspaceManager {
 }
 
 struct PresentationManager {
-    store: std::sync::Mutex<PresentationStore>,
+    store: Arc<std::sync::Mutex<PresentationStore>>,
 }
 
 impl PresentationManager {
     fn new(storage_path: PathBuf) -> Self {
         Self {
-            store: std::sync::Mutex::new(PresentationStore::open(storage_path)),
+            store: Arc::new(std::sync::Mutex::new(PresentationStore::open(storage_path))),
         }
     }
 
@@ -181,15 +195,22 @@ impl PresentationManager {
             .map_err(ApplicationErrorDto::from)
     }
 
-    fn set(
+    async fn set(
         &self,
         preferences: PresentationPreferencesDto,
     ) -> Result<PresentationPreferencesDto, ApplicationErrorDto> {
-        self.store
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .set(preferences)
-            .map_err(ApplicationErrorDto::from)
+        let store = Arc::clone(&self.store);
+        tokio::task::spawn_blocking(move || {
+            store
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                .set(preferences)
+                .map_err(ApplicationErrorDto::from)
+        })
+        .await
+        .map_err(|_| {
+            ApplicationErrorDto::from(crate::presentation::PresentationError::SaveFailed)
+        })?
     }
 }
 
@@ -272,10 +293,10 @@ fn workspace_validate(
 }
 
 #[tauri::command]
-fn workspace_recent_list(
+async fn workspace_recent_list(
     manager: tauri::State<'_, WorkspaceManager>,
 ) -> Result<RecentWorkspaceListDto, ApplicationErrorDto> {
-    manager.recent()
+    manager.recent_refreshed().await
 }
 
 #[tauri::command]
@@ -606,11 +627,11 @@ fn presentation_get(
 }
 
 #[tauri::command]
-fn presentation_set(
+async fn presentation_set(
     manager: tauri::State<'_, PresentationManager>,
     request: PresentationPreferencesDto,
 ) -> Result<PresentationPreferencesDto, ApplicationErrorDto> {
-    manager.set(request)
+    manager.set(request).await
 }
 
 pub fn run() {

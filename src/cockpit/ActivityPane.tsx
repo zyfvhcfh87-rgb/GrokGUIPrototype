@@ -1,11 +1,15 @@
 import type { ReactNode } from "react";
 
 import type { ConfigOption, ConfigValue } from "../application/contract.ts";
-import type { ConversationPresentation } from "../application/conversation.ts";
+import type {
+  ActivityPresentation,
+  SessionControlPresentation,
+} from "../application/conversation.ts";
 import { describeActivityStatus, describeToolKind } from "../application/conversation.ts";
 
 export function ActivityPane({
-  presentation,
+  controls,
+  activity,
   controlBusy,
   onModelChange,
   onReasoningChange,
@@ -16,7 +20,8 @@ export function ActivityPane({
   onRevisePlan,
   health,
 }: {
-  presentation: ConversationPresentation;
+  controls: SessionControlPresentation;
+  activity: ActivityPresentation;
   controlBusy: boolean;
   onModelChange: (modelId: string) => void;
   onReasoningChange: (value: string) => void;
@@ -27,7 +32,6 @@ export function ActivityPane({
   onRevisePlan: () => void;
   health?: ReactNode;
 }) {
-  const { controls, activity } = presentation;
   const usage = activity.usage;
 
   return (

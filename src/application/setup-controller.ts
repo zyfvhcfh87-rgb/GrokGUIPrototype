@@ -1,5 +1,6 @@
 import type {
   ApplicationError,
+  ApplicationEvent,
   ApplicationEventEnvelope,
   RecentWorkspace,
   RecentWorkspaceList,
@@ -9,7 +10,7 @@ import type {
   Workspace,
   WorkspaceRequest,
 } from "./contract.ts";
-import { initialApplicationState, reduceApplicationEvent } from "./state.ts";
+import { createApplicationStore, type ApplicationStore } from "./state.ts";
 
 type Unlisten = () => void;
 
@@ -49,10 +50,15 @@ const INITIAL_STATE: SetupControllerState = {
   choosingWorkspace: false,
 };
 
-export function createSetupController(bridge: SetupControllerBridge) {
+export function createSetupController(
+  bridge: SetupControllerBridge,
+  applicationStore?: ApplicationStore,
+) {
+  const ownsStore = applicationStore === undefined;
+  const store = applicationStore ?? createApplicationStore();
   let state = INITIAL_STATE;
-  let orderedState = initialApplicationState();
   let unlisten: Unlisten | null = null;
+  let unsubscribeStore: Unlisten | null = null;
   let lifecycle = 0;
   let restoredWorkspace = false;
   const listeners = new Set<(state: SetupControllerState) => void>();
@@ -64,45 +70,44 @@ export function createSetupController(bridge: SetupControllerBridge) {
     }
   };
 
-  const handleEvent = (envelope: ApplicationEventEnvelope) => {
-    const previous = orderedState;
-    orderedState = reduceApplicationEvent(orderedState, envelope);
-    if (orderedState === previous || orderedState.runtime === previous.runtime) {
+  const syncRuntime = () => {
+    const runtime = store.getState().runtime;
+    const failure =
+      runtime.failure === null
+        ? runtime.state === "failed"
+          ? state.failure
+          : null
+        : {
+            code: "connection_failed" as const,
+            diagnostic: runtime.failure.diagnostic,
+            recoverable: runtime.failure.recoverable,
+          };
+    if (runtime.state === state.runtimeState && failureSame(failure, state.failure)) {
       return;
     }
-    const orderedFailure = orderedState.runtime.failure;
     publish({
-      runtimeState: orderedState.runtime.state,
-      failure:
-        orderedFailure === null
-          ? orderedState.runtime.state === "failed"
-            ? state.failure
-            : null
-          : {
-              code: "connection_failed",
-              diagnostic: orderedFailure.diagnostic,
-              recoverable: orderedFailure.recoverable,
-            },
+      runtimeState: runtime.state,
+      failure,
     });
   };
 
-  const acceptSnapshot = (snapshot: RuntimeSnapshot) => {
-    const snapshotIsCurrent =
-      snapshot.generation > orderedState.generation ||
-      (snapshot.generation === orderedState.generation &&
-        snapshot.lastSequence >= orderedState.lastSequence);
-    if (snapshotIsCurrent) {
-      const snapshotState = initialApplicationState(snapshot.generation);
-      orderedState = {
-        ...snapshotState,
-        lastSequence: snapshot.lastSequence,
-        runtime: {
-          ...snapshotState.runtime,
-          state: snapshot.state,
-        },
-      };
+  const handleEvent = (envelope: ApplicationEventEnvelope) => {
+    if (!isRuntimeEvent(envelope.event)) {
+      if (ownsStore) {
+        store.observeSequence(envelope);
+      }
+      return;
     }
-    return orderedState.runtime.state;
+    store.dispatch(envelope);
+  };
+
+  const acceptSnapshot = (snapshot: RuntimeSnapshot) => {
+    store.adoptAuthoritativeSnapshot({
+      generation: snapshot.generation,
+      lastSequence: snapshot.lastSequence,
+      state: snapshot.state,
+    });
+    return store.getState().runtime.state;
   };
 
   const refreshRecent = async () => {
@@ -193,6 +198,9 @@ export function createSetupController(bridge: SetupControllerBridge) {
         return;
       }
       const currentLifecycle = ++lifecycle;
+      unsubscribeStore ??= store.subscribe(() => {
+        syncRuntime();
+      });
       try {
         const nextUnlisten = await bridge.onEvent(handleEvent);
         if (currentLifecycle !== lifecycle) {
@@ -310,9 +318,44 @@ export function createSetupController(bridge: SetupControllerBridge) {
       lifecycle += 1;
       unlisten?.();
       unlisten = null;
+      unsubscribeStore?.();
+      unsubscribeStore = null;
       listeners.clear();
     },
   } as const;
+}
+
+function isRuntimeEvent(event: ApplicationEvent): boolean {
+  switch (event.type) {
+    case "runtime_state_changed":
+    case "runtime_failed":
+    case "extension_observed":
+    case "interaction_resolved":
+      return true;
+    case "runtime_extension_invalidated":
+    case "elicitation_requested":
+    case "interactions_cleared":
+      return event.sessionId === null;
+    default:
+      return false;
+  }
+}
+
+function failureSame(
+  left: ApplicationError | null,
+  right: ApplicationError | null,
+): boolean {
+  if (left === right) {
+    return true;
+  }
+  if (left === null || right === null) {
+    return false;
+  }
+  return (
+    left.code === right.code &&
+    left.diagnostic === right.diagnostic &&
+    left.recoverable === right.recoverable
+  );
 }
 
 function applicationError(

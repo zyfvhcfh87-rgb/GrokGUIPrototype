@@ -24,6 +24,7 @@ pub(crate) struct WorkspaceStore {
     paths: Vec<PathBuf>,
     last_sessions: Vec<(PathBuf, String)>,
     preference_error: bool,
+    availability: Vec<(PathBuf, bool)>,
 }
 
 #[derive(Debug)]
@@ -51,6 +52,7 @@ impl WorkspaceStore {
             paths,
             last_sessions,
             preference_error,
+            availability: Vec::new(),
         }
     }
 
@@ -65,10 +67,29 @@ impl WorkspaceStore {
             .cloned()
             .map(|path| RecentWorkspace {
                 last_session_id: last_session_for(&self.last_sessions, &path),
-                available: path.is_dir(),
+                available: self.cached_available(&path),
                 path,
             })
             .collect())
+    }
+
+    pub fn paths(&self) -> Vec<PathBuf> {
+        self.paths.clone()
+    }
+
+    pub fn probe_availability(paths: &[PathBuf]) -> Vec<(PathBuf, bool)> {
+        paths
+            .iter()
+            .map(|path| (path.clone(), path.is_dir()))
+            .collect()
+    }
+
+    pub fn apply_availability(&mut self, probed: &[(PathBuf, bool)]) {
+        for (path, available) in probed {
+            if self.paths.iter().any(|existing| same_path(existing, path)) {
+                self.remember_availability(path, *available);
+            }
+        }
     }
 
     pub fn select(&mut self, path: &Path) -> Result<PathBuf, WorkspaceError> {
@@ -80,6 +101,8 @@ impl WorkspaceStore {
         paths.truncate(MAX_RECENT_WORKSPACES);
         self.paths = paths;
         self.prune_last_sessions();
+        self.remember_availability(&canonical, true);
+        self.prune_availability();
         self.preference_error = self.persist().is_err();
         Ok(canonical)
     }
@@ -92,6 +115,7 @@ impl WorkspaceStore {
         }
         self.paths = paths;
         self.prune_last_sessions();
+        self.prune_availability();
         self.preference_error = self.persist().is_err();
         Ok(())
     }
@@ -122,6 +146,25 @@ impl WorkspaceStore {
             return;
         }
         self.preference_error = self.persist().is_err();
+    }
+
+    fn cached_available(&self, path: &Path) -> bool {
+        self.availability
+            .iter()
+            .find(|(existing, _)| same_path(existing, path))
+            .map(|(_, available)| *available)
+            .unwrap_or(false)
+    }
+
+    fn remember_availability(&mut self, path: &Path, available: bool) {
+        self.availability
+            .retain(|(existing, _)| !same_path(existing, path));
+        self.availability.push((path.to_path_buf(), available));
+    }
+
+    fn prune_availability(&mut self) {
+        self.availability
+            .retain(|(path, _)| self.paths.iter().any(|existing| same_path(existing, path)));
     }
 
     fn prune_last_sessions(&mut self) {
@@ -293,10 +336,19 @@ mod tests {
                 last_session_id: None,
             }]
         );
+        let mut reopened = WorkspaceStore::open(storage_path);
         assert_eq!(
-            WorkspaceStore::open(storage_path)
-                .recent()
-                .expect("reopened recent workspaces"),
+            reopened.recent().expect("reopened recent workspaces"),
+            vec![RecentWorkspace {
+                path: selected.clone(),
+                available: false,
+                last_session_id: None,
+            }]
+        );
+        let probed = WorkspaceStore::probe_availability(&reopened.paths());
+        reopened.apply_availability(&probed);
+        assert_eq!(
+            reopened.recent().expect("probed recent workspaces"),
             vec![RecentWorkspace {
                 path: selected,
                 available: true,
@@ -460,11 +512,13 @@ mod tests {
         )
         .expect("write fixture");
 
-        let recents = WorkspaceStore::open(storage_path)
-            .recent()
-            .expect("recents should remain usable");
+        let mut store = WorkspaceStore::open(storage_path);
+        let before = store.recent().expect("recents should remain usable");
+        assert!(!before[0].available);
+        let probed = WorkspaceStore::probe_availability(&store.paths());
+        store.apply_availability(&probed);
         assert_eq!(
-            recents,
+            store.recent().expect("probed recents"),
             vec![RecentWorkspace {
                 path: canonical,
                 available: true,
