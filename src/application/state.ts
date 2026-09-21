@@ -185,21 +185,6 @@ function adoptAuthoritativeSnapshot(
   current: ApplicationState,
   snapshot: RuntimeSnapshotCheckpoint,
 ): ApplicationState {
-  const snapshotIsCurrent =
-    snapshot.generation > current.generation ||
-    (snapshot.generation === current.generation &&
-      snapshot.lastSequence >= current.lastSequence &&
-      current.pendingEventCount === 0);
-  if (!snapshotIsCurrent) {
-    return current;
-  }
-  if (
-    snapshot.generation === current.generation &&
-    snapshot.lastSequence === current.lastSequence &&
-    current.runtime.state === snapshot.state
-  ) {
-    return current;
-  }
   if (snapshot.generation > current.generation) {
     const fresh = initialApplicationState(snapshot.generation);
     return {
@@ -210,6 +195,23 @@ function adoptAuthoritativeSnapshot(
         state: snapshot.state,
       },
     };
+  }
+  // A live same-generation stream has already applied events. Moving
+  // lastSequence ahead of that watermark drops envelopes that are still in
+  // flight, because in-order delivery never parks them in pendingEvents.
+  if (
+    snapshot.generation !== current.generation ||
+    current.lastSequence !== 0 ||
+    current.pendingEventCount !== 0 ||
+    snapshot.lastSequence < current.lastSequence
+  ) {
+    return current;
+  }
+  if (
+    snapshot.lastSequence === current.lastSequence &&
+    current.runtime.state === snapshot.state
+  ) {
+    return current;
   }
   return {
     ...current,

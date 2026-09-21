@@ -121,6 +121,37 @@ test("a newer runtime generation atomically clears sessions and rejects old even
   assert.deepEqual(state.sessions, {});
 });
 
+test("a same-generation snapshot does not skip events that are still in flight", () => {
+  const store = createApplicationStore();
+  store.dispatch(runtimeEvent(1, 1, "ready"));
+  store.adoptAuthoritativeSnapshot({
+    generation: 1,
+    lastSequence: 4,
+    state: "working",
+  });
+
+  assert.equal(store.getState().lastSequence, 1);
+  assert.equal(store.getState().runtime.state, "ready");
+
+  store.dispatch({
+    generation: 1,
+    sequence: 2,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "still here",
+      truncated: false,
+    },
+  });
+
+  assert.equal(store.getState().lastSequence, 2);
+  assert.equal(
+    streamChunkText(store.getState().sessions["session-1"].messages["assistant:assistant-1"]),
+    "still here",
+  );
+});
+
 test("in-order events apply without copying the pending map", () => {
   const initial = reduceApplicationEvent(
     initialApplicationState(),
