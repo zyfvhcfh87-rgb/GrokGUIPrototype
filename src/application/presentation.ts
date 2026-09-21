@@ -43,6 +43,39 @@ export type PresentationState = {
   loaded: boolean;
 };
 
+export const PANEL_WIDTH_PERSIST_DELAY_MS = 200;
+
+export function createPanelWidthWriter(
+  commit: (width: number) => void,
+  delayMs = PANEL_WIDTH_PERSIST_DELAY_MS,
+) {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  return {
+    writeKeyboard(width: number) {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+      }
+      timer = setTimeout(() => {
+        timer = undefined;
+        commit(width);
+      }, delayMs);
+    },
+    writePointer(width: number) {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+      commit(width);
+    },
+    dispose() {
+      if (timer !== undefined) {
+        clearTimeout(timer);
+        timer = undefined;
+      }
+    },
+  };
+}
+
 export function clampPanelWidth(value: number): number {
   if (!Number.isFinite(value)) {
     return DEFAULT_PROJECTS_WIDTH;

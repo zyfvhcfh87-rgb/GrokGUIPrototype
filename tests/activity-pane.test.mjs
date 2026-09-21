@@ -101,9 +101,11 @@ function presentation(commands) {
 
 function render(commands) {
   const clicks = [];
+  const view = presentation(commands);
   const html = renderToStaticMarkup(
     React.createElement(ActivityPane, {
-      presentation: presentation(commands),
+      controls: view.controls,
+      activity: view.activity,
       controlBusy: false,
       onModelChange() {},
       onReasoningChange() {},

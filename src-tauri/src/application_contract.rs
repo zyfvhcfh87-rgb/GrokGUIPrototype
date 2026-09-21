@@ -2320,12 +2320,50 @@ fn validate_output_text(value: &str, maximum_bytes: usize) -> Option<()> {
 }
 
 fn bounded_serialized_event(event: ApplicationEvent) -> ApplicationEvent {
+    match chunk_event_within_bounds(&event) {
+        Some(true) => return event,
+        Some(false) => return oversized_application_event(),
+        None => {}
+    }
     match serde_json::to_vec(&event) {
         Ok(encoded) if encoded.len() <= MAX_SERIALIZED_EVENT_BYTES => event,
-        _ => ApplicationEvent::RuntimeFailed {
-            diagnostic: "runtime event exceeded the safe application boundary".to_owned(),
-            recoverable: true,
-        },
+        _ => oversized_application_event(),
+    }
+}
+
+fn chunk_event_within_bounds(event: &ApplicationEvent) -> Option<bool> {
+    let (session_id, identifier, text) = match event {
+        ApplicationEvent::UserMessageChunkReceived {
+            session_id,
+            message_id,
+            text,
+            ..
+        }
+        | ApplicationEvent::MessageChunkReceived {
+            session_id,
+            message_id,
+            text,
+            ..
+        } => (session_id.as_str(), message_id.as_deref(), text.as_str()),
+        ApplicationEvent::ThoughtChunkReceived {
+            session_id,
+            thought_id,
+            text,
+            ..
+        } => (session_id.as_str(), thought_id.as_deref(), text.as_str()),
+        _ => return None,
+    };
+    Some(
+        session_id.len() <= MAX_IDENTIFIER_BYTES
+            && identifier.is_none_or(|value| value.len() <= MAX_CURSOR_BYTES)
+            && text.len() <= MAX_EVENT_TEXT_BYTES,
+    )
+}
+
+fn oversized_application_event() -> ApplicationEvent {
+    ApplicationEvent::RuntimeFailed {
+        diagnostic: "runtime event exceeded the safe application boundary".to_owned(),
+        recoverable: true,
     }
 }
 
@@ -3402,6 +3440,27 @@ mod tests {
         });
         assert!(matches!(
             envelope.event,
+            ApplicationEvent::RuntimeFailed { .. }
+        ));
+
+        let chunk = clock.envelope(ApplicationEvent::MessageChunkReceived {
+            session_id: "session-1".to_owned(),
+            message_id: Some("assistant-1".to_owned()),
+            text: "hi".to_owned(),
+            truncated: false,
+        });
+        assert!(matches!(
+            chunk.event,
+            ApplicationEvent::MessageChunkReceived { .. }
+        ));
+        let oversized_chunk = clock.envelope(ApplicationEvent::ThoughtChunkReceived {
+            session_id: "session-1".to_owned(),
+            thought_id: None,
+            text: "x".repeat(MAX_EVENT_TEXT_BYTES + 1),
+            truncated: false,
+        });
+        assert!(matches!(
+            oversized_chunk.event,
             ApplicationEvent::RuntimeFailed { .. }
         ));
     }

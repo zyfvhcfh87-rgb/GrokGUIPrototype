@@ -1,4 +1,5 @@
 use std::{
+    collections::HashMap,
     ffi::OsStr,
     path::{Component, Path, PathBuf},
     process::Stdio,
@@ -31,7 +32,6 @@ const READ_ONLY_STATUS_ARGS: &[&str] = &[
     "--porcelain=v1",
     "-z",
     "--untracked-files=all",
-    "--ignored=matching",
 ];
 
 pub async fn inspect_workspace_changes(
@@ -44,8 +44,8 @@ pub async fn inspect_workspace_changes(
 async fn inspect_canonical_workspace(
     workspace: &Path,
 ) -> Result<WorkspaceChangesDto, ApplicationErrorDto> {
-    let inside = match git_output(workspace, &["rev-parse", "--is-inside-work-tree"]).await {
-        Ok(output) if output.status_success && output.stdout.trim() == "true" => true,
+    let inside = match git_output(workspace, ["rev-parse", "--is-inside-work-tree"], false).await {
+        Ok((output, _)) if output.status_success && output.stdout.trim() == "true" => true,
         Ok(_) => false,
         Err(GitInvokeError::NotFound) => {
             return Ok(WorkspaceChangesDto::unavailable());
@@ -58,8 +58,8 @@ async fn inspect_canonical_workspace(
         return Ok(WorkspaceChangesDto::not_a_repository());
     }
 
-    let toplevel = match git_output(workspace, &["rev-parse", "--show-toplevel"]).await {
-        Ok(output) if output.status_success => {
+    let toplevel = match git_output(workspace, ["rev-parse", "--show-toplevel"], false).await {
+        Ok((output, _)) if output.status_success => {
             let trimmed = output.stdout.trim();
             if trimmed.is_empty() {
                 return Ok(WorkspaceChangesDto::not_a_repository());
@@ -73,8 +73,8 @@ async fn inspect_canonical_workspace(
         _ => return Ok(WorkspaceChangesDto::unavailable()),
     };
 
-    let status = match git_output(&toplevel, READ_ONLY_STATUS_ARGS).await {
-        Ok(output) if output.status_success => output.stdout_bytes,
+    let status = match git_output(&toplevel, READ_ONLY_STATUS_ARGS, false).await {
+        Ok((output, _)) if output.status_success => output.stdout_bytes,
         Ok(_) | Err(_) => return Ok(WorkspaceChangesDto::unavailable()),
     };
 
@@ -84,6 +84,7 @@ async fn inspect_canonical_workspace(
     let mut truncated = parsed.truncated;
     let mut total_diff_bytes = 0_usize;
     let mut entries = Vec::new();
+    let mut diff_paths = Vec::new();
 
     for record in parsed.entries {
         if entries.len() >= MAX_CHANGED_PATHS {
@@ -102,7 +103,7 @@ async fn inspect_canonical_workspace(
             continue;
         }
 
-        let mut entry = WorkspaceChangeEntryDto {
+        let entry = WorkspaceChangeEntryDto {
             path: relative,
             previous_path,
             status: record.status,
@@ -111,12 +112,37 @@ async fn inspect_canonical_workspace(
             truncated: false,
         };
 
+        if !should_omit_diff(&entry.path, entry.status) {
+            diff_paths.push(record.path);
+        }
+        entries.push(entry);
+    }
+
+    let diffs = diffs_for_paths(&toplevel, &diff_paths).await;
+    if diffs.output_truncated {
+        truncated = true;
+    }
+    let mut diff_index = 0_usize;
+    for entry in &mut entries {
         if should_omit_diff(&entry.path, entry.status) {
-            entries.push(entry);
             continue;
         }
-
-        match diff_for_path(&toplevel, &record.path).await {
+        let git_path = diff_paths.get(diff_index).map(String::as_str).unwrap_or("");
+        diff_index += 1;
+        let inspection = diffs
+            .by_path
+            .get(git_path)
+            .cloned()
+            .unwrap_or(if diffs.output_truncated {
+                DiffInspection::Text {
+                    text: String::new(),
+                    truncated: true,
+                    omitted_lines: 0,
+                }
+            } else {
+                DiffInspection::Unavailable
+            });
+        match inspection {
             DiffInspection::Text {
                 text,
                 truncated: diff_truncated,
@@ -144,7 +170,6 @@ async fn inspect_canonical_workspace(
                 entry.content = WorkspaceChangeContentDto::Unavailable;
             }
         }
-        entries.push(entry);
     }
 
     Ok(WorkspaceChangesDto {
@@ -170,12 +195,18 @@ struct GitOutput {
     stdout_bytes: Vec<u8>,
 }
 
-async fn git_output(workspace: &Path, args: &[&str]) -> Result<GitOutput, GitInvokeError> {
+async fn git_output(
+    workspace: &Path,
+    args: impl IntoIterator<Item = impl AsRef<str>>,
+    truncate_output: bool,
+) -> Result<(GitOutput, bool), GitInvokeError> {
     let mut command = Command::new("git");
     command.arg("-C").arg(workspace);
     command.arg("--no-pager");
     command.arg("--no-optional-locks");
-    command.args(args);
+    for arg in args {
+        command.arg(arg.as_ref());
+    }
     command.stdin(Stdio::null());
     command.stdout(Stdio::piped());
     command.stderr(Stdio::piped());
@@ -200,17 +231,26 @@ async fn git_output(workspace: &Path, args: &[&str]) -> Result<GitOutput, GitInv
             }
         })?;
 
-    if output.stdout.len() > MAX_GIT_OUTPUT_BYTES {
+    let output_truncated = output.stdout.len() > MAX_GIT_OUTPUT_BYTES;
+    if output_truncated && !truncate_output {
         return Err(GitInvokeError::Failed);
     }
+    let stdout_bytes = if output_truncated {
+        output.stdout[..MAX_GIT_OUTPUT_BYTES].to_vec()
+    } else {
+        output.stdout
+    };
 
-    let stdout = String::from_utf8_lossy(&output.stdout).into_owned();
+    let stdout = String::from_utf8_lossy(&stdout_bytes).into_owned();
     let _ = RedactedDiagnostic::new(String::from_utf8_lossy(&output.stderr));
-    Ok(GitOutput {
-        status_success: output.status.success(),
-        stdout,
-        stdout_bytes: output.stdout,
-    })
+    Ok((
+        GitOutput {
+            status_success: output.status.success(),
+            stdout,
+            stdout_bytes,
+        },
+        output_truncated,
+    ))
 }
 
 struct PorcelainRecord {
@@ -398,6 +438,7 @@ fn is_sensitive_relative_path(relative: &str) -> bool {
         || file_name.contains("secret")
 }
 
+#[derive(Clone)]
 enum DiffInspection {
     Text {
         text: String,
@@ -408,68 +449,263 @@ enum DiffInspection {
     Unavailable,
 }
 
-async fn diff_for_path(toplevel: &Path, git_path: &str) -> DiffInspection {
-    match git_output(
-        toplevel,
-        &[
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "--numstat",
-            "HEAD",
-            "--",
-            git_path,
-        ],
-    )
-    .await
-    {
-        Ok(output) if output.status_success => {
-            if is_binary_numstat(&output.stdout) {
-                return DiffInspection::Binary;
-            }
-        }
-        Ok(_) | Err(_) => return DiffInspection::Unavailable,
+struct BatchedDiffs {
+    by_path: HashMap<String, DiffInspection>,
+    output_truncated: bool,
+}
+
+async fn diffs_for_paths(toplevel: &Path, paths: &[String]) -> BatchedDiffs {
+    if paths.is_empty() {
+        return BatchedDiffs {
+            by_path: HashMap::new(),
+            output_truncated: false,
+        };
     }
 
-    match git_output(
-        toplevel,
-        &[
-            "diff",
-            "--no-color",
-            "--no-ext-diff",
-            "--no-textconv",
-            "-U3",
-            "HEAD",
-            "--",
-            git_path,
-        ],
-    )
-    .await
+    let mut numstat_args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--numstat",
+        "-z",
+        "HEAD",
+        "--",
+    ];
+    for path in paths {
+        numstat_args.push(path);
+    }
+    let mut diff_args = vec![
+        "diff",
+        "--no-color",
+        "--no-ext-diff",
+        "--no-textconv",
+        "-U3",
+        "HEAD",
+        "--",
+    ];
+    for path in paths {
+        diff_args.push(path);
+    }
+
+    let numstat = git_output(toplevel, numstat_args, true).await;
+    let unified = git_output(toplevel, diff_args, true).await;
+    let output_truncated = matches!(&numstat, Ok((_, truncated)) if *truncated)
+        || matches!(&unified, Ok((_, truncated)) if *truncated);
+    let numstat_ok = matches!(&numstat, Ok((output, _)) if output.status_success);
+    let unified_ok = matches!(&unified, Ok((output, _)) if output.status_success);
+    let mut by_path = HashMap::new();
+
+    if !numstat_ok && !unified_ok {
+        for path in paths {
+            by_path.insert(path.clone(), DiffInspection::Unavailable);
+        }
+        return BatchedDiffs {
+            by_path,
+            output_truncated,
+        };
+    }
+
+    if let Ok((output, _)) = &unified
+        && output.status_success
     {
-        Ok(output) if output.status_success => {
-            if output.stdout_bytes.contains(&0) || output.stdout.contains("Binary files ") {
-                return DiffInspection::Binary;
-            }
-            let (text, truncated, omitted_lines) = bound_diff_lines(&output.stdout);
-            DiffInspection::Text {
-                text,
-                truncated,
-                omitted_lines,
+        for (path, section) in split_unified_diff(&output.stdout_bytes) {
+            by_path.insert(path, inspection_from_section(&section));
+        }
+    }
+
+    if let Ok((output, _)) = &numstat
+        && output.status_success
+    {
+        for (path, binary) in parse_numstat_z(&output.stdout_bytes) {
+            if binary {
+                by_path.insert(path, DiffInspection::Binary);
+            } else if unified_ok && !output_truncated {
+                by_path.entry(path).or_insert_with(DiffInspection::empty_text);
             }
         }
-        _ => DiffInspection::Unavailable,
+    }
+
+    BatchedDiffs {
+        by_path,
+        output_truncated,
     }
 }
 
-fn is_binary_numstat(stdout: &str) -> bool {
-    stdout.lines().any(|line| {
-        let mut parts = line.split('\t');
-        matches!(
-            (parts.next(), parts.next()),
-            (Some("-"), Some("-")) | (Some("Bin"), _)
-        )
-    })
+impl DiffInspection {
+    fn empty_text() -> Self {
+        Self::Text {
+            text: String::new(),
+            truncated: false,
+            omitted_lines: 0,
+        }
+    }
+}
+
+fn inspection_from_section(section: &[u8]) -> DiffInspection {
+    let text = String::from_utf8_lossy(section);
+    if section.contains(&0) || text.contains("Binary files ") {
+        return DiffInspection::Binary;
+    }
+    let (text, truncated, omitted_lines) = bound_diff_lines(&text);
+    DiffInspection::Text {
+        text,
+        truncated,
+        omitted_lines,
+    }
+}
+
+fn parse_numstat_z(bytes: &[u8]) -> Vec<(String, bool)> {
+    let mut entries = Vec::new();
+    let mut cursor = 0;
+    while cursor < bytes.len() {
+        let Some(field) = read_raw_field(bytes, &mut cursor) else {
+            break;
+        };
+        let Some((binary, mut path)) = parse_numstat_field(field) else {
+            continue;
+        };
+        if cursor < bytes.len() && !field_starts_with_stat(bytes, cursor) {
+            if let Some(destination) = read_raw_field(bytes, &mut cursor)
+                && let Ok(destination) = std::str::from_utf8(destination)
+                && !destination.is_empty()
+            {
+                path = destination.to_owned();
+            }
+        }
+        entries.push((path, binary));
+    }
+    entries
+}
+
+fn field_starts_with_stat(bytes: &[u8], cursor: usize) -> bool {
+    let rest = &bytes[cursor..];
+    let end = rest.iter().position(|byte| *byte == 0).unwrap_or(rest.len());
+    rest[..end].contains(&b'\t')
+}
+
+fn read_raw_field<'a>(bytes: &'a [u8], cursor: &mut usize) -> Option<&'a [u8]> {
+    if *cursor >= bytes.len() {
+        return None;
+    }
+    let start = *cursor;
+    while *cursor < bytes.len() && bytes[*cursor] != 0 {
+        *cursor += 1;
+    }
+    if *cursor >= bytes.len() {
+        return None;
+    }
+    let field = &bytes[start..*cursor];
+    *cursor += 1;
+    Some(field)
+}
+
+fn parse_numstat_field(field: &[u8]) -> Option<(bool, String)> {
+    let text = std::str::from_utf8(field).ok()?;
+    let mut parts = text.split('\t');
+    let added = parts.next()?;
+    let removed = parts.next()?;
+    let path = parts.next()?;
+    if path.is_empty() || parts.next().is_some() {
+        return None;
+    }
+    Some((added == "-" && removed == "-", path.to_owned()))
+}
+
+fn split_unified_diff(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
+    let marker = b"diff --git ";
+    let mut starts = Vec::new();
+    let mut index = 0;
+    while index + marker.len() <= bytes.len() {
+        let at_line = index == 0 || bytes[index - 1] == b'\n';
+        if at_line && bytes[index..].starts_with(marker) {
+            starts.push(index);
+            index += marker.len();
+        } else {
+            index += 1;
+        }
+    }
+    let mut sections = Vec::new();
+    for (offset, start) in starts.iter().copied().enumerate() {
+        let end = starts.get(offset + 1).copied().unwrap_or(bytes.len());
+        let section = &bytes[start..end];
+        let header_end = section.iter().position(|byte| *byte == b'\n').unwrap_or(section.len());
+        let header = String::from_utf8_lossy(&section[..header_end]);
+        if let Some(path) = destination_from_diff_header(&header) {
+            sections.push((path, section.to_vec()));
+        }
+    }
+    sections
+}
+
+fn destination_from_diff_header(header: &str) -> Option<String> {
+    let rest = header
+        .trim_end_matches(['\r', '\n'])
+        .strip_prefix("diff --git ")?;
+    let destination = if rest.starts_with('"') {
+        let (_, after_source) = take_git_quoted(rest)?;
+        let (destination, _) = take_git_quoted(after_source.trim_start())?;
+        unquote_git_path(destination)
+    } else {
+        let marker = rest.rfind(" b/")?;
+        rest[marker + 3..].to_owned()
+    };
+    let destination = destination.replace('\\', "/");
+    if destination.is_empty() || destination == "/dev/null" {
+        return None;
+    }
+    Some(destination)
+}
+
+fn take_git_quoted(text: &str) -> Option<(&str, &str)> {
+    let rest = text.strip_prefix('"')?;
+    let mut escaped = false;
+    for (index, character) in rest.char_indices() {
+        if escaped {
+            escaped = false;
+            continue;
+        }
+        if character == '\\' {
+            escaped = true;
+            continue;
+        }
+        if character == '"' {
+            return Some((&rest[..index], &rest[index + 1..]));
+        }
+    }
+    None
+}
+
+fn unquote_git_path(quoted: &str) -> String {
+    let mut path = String::new();
+    let mut chars = quoted.chars().peekable();
+    while let Some(character) = chars.next() {
+        if character != '\\' {
+            path.push(character);
+            continue;
+        }
+        match chars.next() {
+            Some('\\') => path.push('\\'),
+            Some('"') => path.push('"'),
+            Some('n') => path.push('\n'),
+            Some('t') => path.push('\t'),
+            Some(digit) if digit.is_ascii_digit() => {
+                let mut octal = String::new();
+                octal.push(digit);
+                for _ in 0..2 {
+                    if chars.peek().is_some_and(|next| next.is_ascii_digit()) {
+                        octal.push(chars.next().expect("digit is present"));
+                    }
+                }
+                if let Ok(value) = u8::from_str_radix(&octal, 8) {
+                    path.push(value as char);
+                }
+            }
+            Some(other) => path.push(other),
+            None => path.push('\\'),
+        }
+    }
+    path.strip_prefix("b/").unwrap_or(&path).to_owned()
 }
 
 fn bound_diff_lines(diff: &str) -> (String, bool, u32) {
@@ -503,7 +739,7 @@ fn bound_diff_text(text: &str, maximum_bytes: usize) -> (String, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::process::Command as StdCommand;
+    use std::{process::Command as StdCommand, sync::OnceLock};
 
     fn git_in(path: &Path, args: &[&str]) {
         let status = StdCommand::new("git")
@@ -539,20 +775,61 @@ mod tests {
         assert!(changes.entries.is_empty());
     }
 
+    fn shared_workspace() -> &'static Path {
+        static WORKSPACE: OnceLock<PathBuf> = OnceLock::new();
+        WORKSPACE.get_or_init(|| {
+            let root = tempfile::tempdir().expect("temporary root");
+            let workspace = root.path().join("workspace");
+            std::fs::create_dir(&workspace).expect("workspace");
+            init_repo(&workspace);
+            std::fs::write(workspace.join(".gitignore"), "ignored.txt\nnode_modules/\n")
+                .expect("gitignore");
+            std::fs::write(workspace.join("tracked.txt"), "one\n").expect("tracked file");
+            std::fs::write(workspace.join("data.bin"), [0_u8, 1, 2, 0, 3]).expect("binary");
+            std::fs::create_dir(workspace.join("keep")).expect("selected folder");
+            std::fs::create_dir(workspace.join("other")).expect("other folder");
+            std::fs::write(workspace.join("keep/inside.txt"), "keep\n").expect("inside");
+            std::fs::write(workspace.join("other/outside.txt"), "other\n").expect("outside");
+            std::fs::write(workspace.join("big.txt"), "base\n").expect("base");
+            git_in(
+                &workspace,
+                &[
+                    "add",
+                    ".gitignore",
+                    "tracked.txt",
+                    "data.bin",
+                    "keep/inside.txt",
+                    "other/outside.txt",
+                    "big.txt",
+                ],
+            );
+            git_in(&workspace, &["commit", "-m", "fixture"]);
+            std::fs::write(workspace.join("tracked.txt"), "two\n").expect("dirty tracked file");
+            std::fs::write(workspace.join("notes.md"), "untracked\n").expect("untracked file");
+            std::fs::write(workspace.join(".env"), "SECRET=private\n").expect("sensitive file");
+            std::fs::write(workspace.join("data.bin"), [0_u8, 9, 9, 0, 9]).expect("dirty binary");
+            std::fs::write(workspace.join("keep/inside.txt"), "changed\n").expect("dirty inside");
+            std::fs::write(workspace.join("other/outside.txt"), "changed\n")
+                .expect("dirty outside");
+            std::fs::write(workspace.join("ignored.txt"), "ignored\n").expect("ignored file");
+            std::fs::create_dir(workspace.join("node_modules")).expect("ignored directory");
+            std::fs::write(workspace.join("node_modules/pkg.js"), "x\n").expect("ignored package");
+            let dirty = (0..400)
+                .map(|index| format!("line-{index}-{}", "x".repeat(80)))
+                .collect::<Vec<_>>()
+                .join("\n");
+            std::fs::write(workspace.join("big.txt"), dirty).expect("huge dirty file");
+            let path = workspace.clone();
+            std::mem::forget(root);
+            path
+        })
+    }
+
     #[tokio::test]
     async fn dirty_and_untracked_paths_stay_relative_and_bounded() {
-        let root = tempfile::tempdir().expect("temporary root");
-        let workspace = root.path().join("workspace");
-        std::fs::create_dir(&workspace).expect("workspace");
-        init_repo(&workspace);
-        std::fs::write(workspace.join("tracked.txt"), "one\n").expect("tracked file");
-        git_in(&workspace, &["add", "tracked.txt"]);
-        git_in(&workspace, &["commit", "-m", "fixture"]);
-        std::fs::write(workspace.join("tracked.txt"), "two\n").expect("dirty tracked file");
-        std::fs::write(workspace.join("notes.md"), "untracked\n").expect("untracked file");
-        std::fs::write(workspace.join(".env"), "SECRET=private\n").expect("sensitive file");
+        let workspace = shared_workspace();
 
-        let changes = inspect_workspace_changes(&workspace)
+        let changes = inspect_workspace_changes(workspace)
             .await
             .expect("inspection should succeed");
         assert_eq!(changes.kind, WorkspaceChangeKindDto::Repository);
@@ -589,20 +866,19 @@ mod tests {
                 .as_deref()
                 .is_some_and(|diff| diff.contains("SECRET=private"))
         }));
+        assert!(
+            !changes
+                .entries
+                .iter()
+                .any(|entry| entry.path == "ignored.txt" || entry.path.contains("node_modules"))
+        );
     }
 
     #[tokio::test]
     async fn binary_files_and_escape_paths_fail_closed() {
-        let root = tempfile::tempdir().expect("temporary root");
-        let workspace = root.path().join("workspace");
-        std::fs::create_dir(&workspace).expect("workspace");
-        init_repo(&workspace);
-        std::fs::write(workspace.join("data.bin"), [0_u8, 1, 2, 0, 3]).expect("binary");
-        git_in(&workspace, &["add", "data.bin"]);
-        git_in(&workspace, &["commit", "-m", "binary"]);
-        std::fs::write(workspace.join("data.bin"), [0_u8, 9, 9, 0, 9]).expect("dirty binary");
+        let workspace = shared_workspace();
 
-        let changes = inspect_workspace_changes(&workspace)
+        let changes = inspect_workspace_changes(workspace)
             .await
             .expect("inspection should succeed");
         let binary = changes
@@ -616,27 +892,14 @@ mod tests {
         assert_eq!(normalize_git_path("../secret"), None);
         assert_eq!(normalize_git_path("/etc/passwd"), None);
         assert_eq!(
-            display_path_in_workspace(&workspace, &workspace, "../outside.txt"),
+            display_path_in_workspace(workspace, workspace, "../outside.txt"),
             None
         );
     }
 
     #[tokio::test]
     async fn changes_outside_the_selected_workspace_are_omitted() {
-        let root = tempfile::tempdir().expect("temporary root");
-        let repo = root.path().join("repo");
-        std::fs::create_dir(&repo).expect("repo");
-        init_repo(&repo);
-        std::fs::create_dir(repo.join("keep")).expect("selected folder");
-        std::fs::create_dir(repo.join("other")).expect("other folder");
-        std::fs::write(repo.join("keep/inside.txt"), "keep\n").expect("inside");
-        std::fs::write(repo.join("other/outside.txt"), "other\n").expect("outside");
-        git_in(&repo, &["add", "keep/inside.txt", "other/outside.txt"]);
-        git_in(&repo, &["commit", "-m", "fixture"]);
-        std::fs::write(repo.join("keep/inside.txt"), "changed\n").expect("dirty inside");
-        std::fs::write(repo.join("other/outside.txt"), "changed\n").expect("dirty outside");
-
-        let changes = inspect_workspace_changes(&repo.join("keep"))
+        let changes = inspect_workspace_changes(&shared_workspace().join("keep"))
             .await
             .expect("inspection should succeed");
         assert!(
@@ -655,20 +918,7 @@ mod tests {
 
     #[tokio::test]
     async fn oversized_diffs_are_truncated() {
-        let root = tempfile::tempdir().expect("temporary root");
-        let workspace = root.path().join("workspace");
-        std::fs::create_dir(&workspace).expect("workspace");
-        init_repo(&workspace);
-        std::fs::write(workspace.join("big.txt"), "base\n").expect("base");
-        git_in(&workspace, &["add", "big.txt"]);
-        git_in(&workspace, &["commit", "-m", "fixture"]);
-        let dirty = (0..400)
-            .map(|index| format!("line-{index}-{}", "x".repeat(80)))
-            .collect::<Vec<_>>()
-            .join("\n");
-        std::fs::write(workspace.join("big.txt"), dirty).expect("huge dirty file");
-
-        let changes = inspect_workspace_changes(&workspace)
+        let changes = inspect_workspace_changes(shared_workspace())
             .await
             .expect("inspection should succeed");
         let big = changes
@@ -725,6 +975,38 @@ mod tests {
                 "workspace inspection must not invoke git {verb}"
             );
         }
+        assert!(
+            !production.contains("--ignored"),
+            "workspace inspection must not enumerate ignored paths"
+        );
+    }
+
+    #[test]
+    fn numstat_z_and_unified_headers_keep_destination_paths() {
+        let numstat = b"-\t-\tdata.bin\01\t0\told.txt\0new.txt\01\t1\ttracked.txt\0";
+        let parsed = parse_numstat_z(numstat);
+        assert_eq!(
+            parsed,
+            vec![
+                ("data.bin".to_owned(), true),
+                ("new.txt".to_owned(), false),
+                ("tracked.txt".to_owned(), false),
+            ]
+        );
+
+        let diff = b"diff --git a/keep/inside.txt b/keep/inside.txt\n+changed\ndiff --git a/tracked.txt b/tracked.txt\n+two\n";
+        let sections = split_unified_diff(diff);
+        assert_eq!(sections.len(), 2);
+        assert_eq!(sections[0].0, "keep/inside.txt");
+        assert_eq!(sections[1].0, "tracked.txt");
+        assert!(matches!(
+            inspection_from_section(&sections[1].1),
+            DiffInspection::Text { .. }
+        ));
+        assert!(matches!(
+            inspection_from_section(b"diff --git a/data.bin b/data.bin\nBinary files a/data.bin and b/data.bin differ\n"),
+            DiffInspection::Binary
+        ));
     }
 
     #[test]

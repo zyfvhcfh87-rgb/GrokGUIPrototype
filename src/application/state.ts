@@ -19,9 +19,21 @@ const MAX_PENDING_EVENTS = 128;
 
 export type StreamChunk = {
   id: string;
-  text: string;
+  parts: string[];
   truncated: boolean;
 };
+
+const joinedChunkText = new WeakMap<StreamChunk, string>();
+
+export function streamChunkText(chunk: StreamChunk): string {
+  const cached = joinedChunkText.get(chunk);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const text = chunk.parts.length <= 1 ? (chunk.parts[0] ?? "") : chunk.parts.join("");
+  joinedChunkText.set(chunk, text);
+  return text;
+}
 
 export type ConversationItemKind =
   | "user_message"
@@ -112,21 +124,51 @@ export function initialApplicationState(generation = 0): ApplicationState {
   };
 }
 
+export type RuntimeSnapshotCheckpoint = {
+  generation: number;
+  lastSequence: number;
+  state: RuntimeState;
+};
+
 export function createApplicationStore(initial = initialApplicationState()) {
   let state = initial;
   const listeners = new Set<(state: ApplicationState) => void>();
 
+  const publish = (next: ApplicationState) => {
+    if (next === state) {
+      return;
+    }
+    state = next;
+    for (const listener of listeners) {
+      listener(state);
+    }
+  };
+
   return {
     getState: () => state,
     dispatch: (event: ApplicationEventEnvelope) => {
-      const next = reduceApplicationEvent(state, event);
-      if (next === state) {
+      publish(reduceApplicationEvent(state, event));
+    },
+    observeSequence: (event: ApplicationEventEnvelope) => {
+      const previous = state;
+      const next = reduceApplicationEvent(previous, event, (reduced) => reduced);
+      if (next === previous) {
         return;
       }
       state = next;
-      for (const listener of listeners) {
-        listener(state);
+      if (
+        next.generation !== previous.generation ||
+        next.runtime.state !== previous.runtime.state ||
+        next.runtime.failure !== previous.runtime.failure ||
+        next.needsResync !== previous.needsResync
+      ) {
+        for (const listener of listeners) {
+          listener(state);
+        }
       }
+    },
+    adoptAuthoritativeSnapshot: (snapshot: RuntimeSnapshotCheckpoint) => {
+      publish(adoptAuthoritativeSnapshot(state, snapshot));
     },
     subscribe: (listener: (state: ApplicationState) => void) => {
       listeners.add(listener);
@@ -137,9 +179,56 @@ export function createApplicationStore(initial = initialApplicationState()) {
   } as const;
 }
 
+export type ApplicationStore = ReturnType<typeof createApplicationStore>;
+
+function adoptAuthoritativeSnapshot(
+  current: ApplicationState,
+  snapshot: RuntimeSnapshotCheckpoint,
+): ApplicationState {
+  const snapshotIsCurrent =
+    snapshot.generation > current.generation ||
+    (snapshot.generation === current.generation &&
+      snapshot.lastSequence >= current.lastSequence &&
+      current.pendingEventCount === 0);
+  if (!snapshotIsCurrent) {
+    return current;
+  }
+  if (
+    snapshot.generation === current.generation &&
+    snapshot.lastSequence === current.lastSequence &&
+    current.runtime.state === snapshot.state
+  ) {
+    return current;
+  }
+  if (snapshot.generation > current.generation) {
+    const fresh = initialApplicationState(snapshot.generation);
+    return {
+      ...fresh,
+      lastSequence: snapshot.lastSequence,
+      runtime: {
+        ...fresh.runtime,
+        state: snapshot.state,
+      },
+    };
+  }
+  return {
+    ...current,
+    lastSequence: snapshot.lastSequence,
+    runtime: {
+      ...current.runtime,
+      state: snapshot.state,
+      failure: snapshot.state === "failed" ? current.runtime.failure : null,
+    },
+  };
+}
+
 export function reduceApplicationEvent(
   current: ApplicationState,
   envelope: ApplicationEventEnvelope,
+  apply: (
+    state: ApplicationState,
+    event: ApplicationEvent,
+  ) => ApplicationState = applyEvent,
 ): ApplicationState {
   if (!isValidPosition(envelope) || envelope.generation < current.generation) {
     return current;
@@ -164,6 +253,19 @@ export function reduceApplicationEvent(
     };
   }
 
+  if (
+    envelope.sequence === state.lastSequence + 1 &&
+    state.pendingEventCount === 0
+  ) {
+    return apply(
+      {
+        ...state,
+        lastSequence: envelope.sequence,
+      },
+      envelope.event,
+    );
+  }
+
   if (state.pendingEvents[envelope.sequence] !== undefined) {
     return state;
   }
@@ -186,7 +288,7 @@ export function reduceApplicationEvent(
     }
     const remaining = { ...state.pendingEvents };
     delete remaining[nextSequence];
-    state = applyEvent(
+    state = apply(
       {
         ...state,
         lastSequence: nextSequence,
@@ -336,6 +438,19 @@ function applyEvent(state: ApplicationState, event: ApplicationEvent): Applicati
   };
 }
 
+function releaseClosedSession(session: SessionViewState): SessionViewState {
+  return {
+    ...session,
+    state: "closed",
+    timeline: [],
+    messages: {},
+    thoughts: {},
+    toolCalls: {},
+    permissions: {},
+    elicitations: {},
+  };
+}
+
 function initialSessionState(): SessionViewState {
   return {
     state: "creating",
@@ -371,10 +486,12 @@ function reduceSessionEvent(
       ) {
         return session;
       }
+      if (event.state === "closed") {
+        return releaseClosedSession(session);
+      }
       return event.state === "cancelling" ||
         event.state === "cancelled" ||
         event.state === "completed" ||
-        event.state === "closed" ||
         event.state === "failed"
         ? { ...session, state: event.state, permissions: {}, elicitations: {} }
         : { ...session, state: event.state };
@@ -392,7 +509,10 @@ function reduceSessionEvent(
     case "tool_call_changed":
       return {
         ...session,
-        timeline: rememberTimelineItem(session.timeline, "tool", event.callId),
+        timeline:
+          session.toolCalls[event.callId] === undefined
+            ? rememberTimelineItem(session.timeline, "tool", event.callId)
+            : session.timeline,
         toolCalls: {
           ...session.toolCalls,
           [event.callId]: {
@@ -537,12 +657,15 @@ function appendChunk(
         : "assistant_message";
   return {
     ...session,
-    timeline: rememberTimelineItem(session.timeline, kind, id),
+    timeline:
+      previous === undefined
+        ? rememberTimelineItem(session.timeline, kind, id)
+        : session.timeline,
     [collection]: {
       ...chunks,
       [id]: {
         id,
-        text: `${previous?.text ?? ""}${event.text}`,
+        parts: previous === undefined ? [event.text] : [...previous.parts, event.text],
         truncated: (previous?.truncated ?? false) || event.truncated,
       },
     },

@@ -1,11 +1,22 @@
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  memo,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+  type ReactNode,
+} from "react";
 
 import type { ApplicationTransport } from "./application/bridge.ts";
 import { createApplicationBridge } from "./application/bridge.ts";
 import { buildCompatibilityReport } from "./application/compatibility.ts";
 import { createConversationController } from "./application/conversation-controller.ts";
 import { shortSessionId, workspaceName } from "./application/display.ts";
-import { createInteractionController } from "./application/interaction-controller.ts";
+import {
+  createInteractionController,
+  type InteractionController,
+} from "./application/interaction-controller.ts";
 import type { InteractionContext } from "./application/interactions.ts";
 import { pendingInteractions } from "./application/interactions.ts";
 import {
@@ -19,6 +30,7 @@ import {
 } from "./application/sessions.ts";
 import { describeLaunchState, describeRecovery, describeWorkspaceList } from "./application/setup.ts";
 import { createSetupController } from "./application/setup-controller.ts";
+import { createApplicationStore } from "./application/state.ts";
 import { matchShortcut, shortcutConsumesEvent } from "./application/shortcuts.ts";
 import { createTauriTransport } from "./application/tauri.ts";
 import {
@@ -30,7 +42,7 @@ import appIcon from "./assets/app-icon.svg";
 import { ActivityPane } from "./cockpit/ActivityPane.tsx";
 import { AppearanceDialog } from "./cockpit/AppearanceDialog.tsx";
 import { CompatibilityDialog } from "./cockpit/CompatibilityDialog.tsx";
-import { ConversationPane } from "./cockpit/ConversationPane.tsx";
+import { ConversationComposer, ConversationPane } from "./cockpit/ConversationPane.tsx";
 import { InteractionPane } from "./cockpit/InteractionPane.tsx";
 import { OnboardingDialog } from "./cockpit/OnboardingDialog.tsx";
 import { PanelResize } from "./cockpit/PanelResize.tsx";
@@ -69,20 +81,25 @@ export function App({
   const [sessionFocus, setSessionFocus] = useState(0);
   const [overlay, setOverlay] = useState<Overlay | null>(null);
   const [onboardingStep, setOnboardingStep] = useState<OnboardingStepId>("welcome");
-  const [liveMessage, setLiveMessage] = useState("Checking setup");
   const pendingProjectsFocus = useRef(false);
   const bridge = useMemo(
     () => createApplicationBridge(transport ?? createTauriTransport()),
     [transport],
   );
-  const controller = useMemo(() => createSetupController(bridge), [bridge]);
+  const applicationStore = useMemo(() => createApplicationStore(), []);
+  const controller = useMemo(
+    () => createSetupController(bridge, applicationStore),
+    [applicationStore, bridge],
+  );
   const sessions = useMemo(() => createSessionController(bridge), [bridge]);
-  const conversation = useMemo(() => createConversationController(bridge), [bridge]);
+  const conversation = useMemo(
+    () => createConversationController(bridge, applicationStore),
+    [applicationStore, bridge],
+  );
   const health = useMemo(() => createWorkspaceHealthController(bridge), [bridge]);
   const presentation = useMemo(() => createPresentationController(bridge), [bridge]);
   const state = useSyncExternalStore(controller.subscribe, controller.getState);
   const sessionState = useSyncExternalStore(sessions.subscribe, sessions.getState);
-  const conversationState = useSyncExternalStore(conversation.subscribe, conversation.getState);
   const healthState = useSyncExternalStore(health.subscribe, health.getState);
   const presentationState = useSyncExternalStore(presentation.subscribe, presentation.getState);
   const prefs = presentationState.preferences;
@@ -103,15 +120,12 @@ export function App({
     () => createInteractionController(bridge, readInteractionContext),
     [bridge, readInteractionContext],
   );
-  const interactionStatuses = useSyncExternalStore(interactions.subscribe, interactions.getState);
-  useEffect(() => {
-    interactions.reconcile();
-  }, [interactions, conversationState, sessionState, state]);
   const interactionPane = (
-    <InteractionPane
-      context={readInteractionContext()}
-      controller={interactions}
-      statuses={interactionStatuses}
+    <InteractionHost
+      conversation={conversation}
+      sessions={sessions}
+      setup={controller}
+      interactions={interactions}
     />
   );
 
@@ -218,17 +232,6 @@ export function App({
   });
 
   useEffect(() => {
-    const pending = pendingInteractions(readInteractionContext()).length;
-    if (pending > 0) {
-      setLiveMessage(
-        `${pending} pending request${pending === 1 ? "" : "s"} need review. Approval is never implied by color.`,
-      );
-      return;
-    }
-    setLiveMessage(`Runtime status: ${launch.label}.`);
-  }, [launch.label, readInteractionContext, conversationState, sessionState, state]);
-
-  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       const id = matchShortcut(event);
       if (id === null) {
@@ -302,7 +305,6 @@ export function App({
   }, [conversation, overlay, prefs, presentation, sessions, state.selectedWorkspace]);
 
   const recent = describeWorkspaceList(state.recentWorkspaces);
-  const conversationView = conversation.presentation();
   const hasSession = sessionState.selectedSessionId !== null;
   const sessionList = describeSessionList({
     workspace: sessionState.workspace,
@@ -338,22 +340,6 @@ export function App({
       }}
     />
   );
-  const compatibilityReport = buildCompatibilityReport({
-    generatedAt: "1970-01-01T00:00:00.000Z",
-    setup: state.setup,
-    snapshot: {
-      state: state.runtimeState,
-      capabilities: state.capabilities,
-    },
-  });
-  const onboarding = describeOnboarding({
-    step: onboardingStep,
-    setup: state.setup,
-    runtimeState: state.runtimeState,
-    failure: state.failure,
-    selectedWorkspace: state.selectedWorkspace,
-    capabilities: state.capabilities,
-  });
   const cockpitClassName = [
     "cockpit",
     !prefs.projectsOpen && "cockpit--projects-collapsed",
@@ -367,9 +353,11 @@ export function App({
       <a className="skip-link" href="#main-panel">
         Skip to conversation
       </a>
-      <div className="sr-only" aria-live="polite" aria-atomic="true">
-        {liveMessage}
-      </div>
+      <StatusAnnouncer
+        conversation={conversation}
+        readContext={readInteractionContext}
+        runtimeLabel={launch.label}
+      />
       <Titlebar
         launch={launch}
         brandMark={appIcon}
@@ -448,15 +436,10 @@ export function App({
           aria-labelledby={hasSession ? "conversation-heading" : "launch-heading"}
         >
           {hasSession ? (
-            <ConversationPane
+            <ConversationColumn
+              conversation={conversation}
               interactions={interactionPane}
-              presentation={conversationView}
-              draft={conversationState.draft}
-              onDraftChange={conversation.setDraft}
-              onSend={() => void conversation.sendPrompt().catch(() => undefined)}
-              onCancel={() => void conversation.cancelPrompt().catch(() => undefined)}
               onRecover={() => void controller.retry()}
-              onOpenUrl={(href) => void conversation.openExternalUrl(href).catch(() => undefined)}
             />
           ) : (
             <>
@@ -559,29 +542,7 @@ export function App({
             aria-labelledby={hasSession ? "activity-heading" : "details-heading"}
           >
             {hasSession ? (
-              <ActivityPane
-                presentation={conversationView}
-                controlBusy={conversationState.controlBusy}
-                health={healthPane}
-                onModelChange={(modelId) =>
-                  void conversation
-                    .setModel(modelId, conversationView.controls.currentReasoningValue)
-                    .catch(() => undefined)
-                }
-                onReasoningChange={(value) => {
-                  const modelId = conversationView.controls.currentModelId;
-                  if (modelId !== null) {
-                    void conversation.setModel(modelId, value).catch(() => undefined);
-                  }
-                }}
-                onModeChange={(modeId) => void conversation.setMode(modeId).catch(() => undefined)}
-                onConfigChange={(configId, value) =>
-                  void conversation.setConfig(configId, value).catch(() => undefined)
-                }
-                onInsertCommand={conversation.insertCommand}
-                onApprovePlan={() => void conversation.reviewPlan("approve").catch(() => undefined)}
-                onRevisePlan={() => void conversation.reviewPlan("revise").catch(() => undefined)}
-              />
+              <ActivityColumn conversation={conversation} health={healthPane} />
             ) : (
               <>
                 <p className="shell-panel__eyebrow">Connection</p>
@@ -672,7 +633,14 @@ export function App({
 
       {overlay === "onboarding" ? (
         <OnboardingDialog
-          presentation={onboarding}
+          presentation={describeOnboarding({
+            step: onboardingStep,
+            setup: state.setup,
+            runtimeState: state.runtimeState,
+            failure: state.failure,
+            selectedWorkspace: state.selectedWorkspace,
+            capabilities: state.capabilities,
+          })}
           recovery={recovery}
           onStep={setOnboardingStep}
           onSkip={() => {
@@ -698,12 +666,180 @@ export function App({
       {overlay === "compatibility" ? (
         <CompatibilityDialog
           report={{
-            ...compatibilityReport,
+            ...buildCompatibilityReport({
+              generatedAt: "1970-01-01T00:00:00.000Z",
+              setup: state.setup,
+              snapshot: {
+                state: state.runtimeState,
+                capabilities: state.capabilities,
+              },
+            }),
             generatedAt: new Date().toISOString(),
           }}
           onClose={() => setOverlay(null)}
         />
       ) : null}
+    </div>
+  );
+}
+
+const STATUS_ANNOUNCE_DELAY_MS = 300;
+
+function ConversationColumn({
+  conversation,
+  interactions,
+  onRecover,
+}: {
+  conversation: ReturnType<typeof createConversationController>;
+  interactions: ReactNode;
+  onRecover: () => void;
+}) {
+  const presentation = useSyncExternalStore(
+    conversation.subscribeTranscript,
+    conversation.getTranscriptSnapshot,
+  );
+  return (
+    <ConversationPane
+      interactions={interactions}
+      presentation={presentation}
+      onRecover={onRecover}
+      onOpenUrl={(href) => void conversation.openExternalUrl(href).catch(() => undefined)}
+      composer={<ConversationDraft conversation={conversation} />}
+    />
+  );
+}
+
+const ConversationDraft = memo(function ConversationDraft({
+  conversation,
+}: {
+  conversation: ReturnType<typeof createConversationController>;
+}) {
+  const draft = useSyncExternalStore(conversation.subscribeDraft, conversation.getDraft);
+  const composer = useSyncExternalStore(
+    conversation.subscribeComposer,
+    conversation.getComposerSnapshot,
+  );
+  return (
+    <ConversationComposer
+      draft={draft}
+      composer={composer}
+      onDraftChange={conversation.setDraft}
+      onSend={() => void conversation.sendPrompt().catch(() => undefined)}
+      onCancel={() => void conversation.cancelPrompt().catch(() => undefined)}
+    />
+  );
+});
+
+function ActivityColumn({
+  conversation,
+  health,
+}: {
+  conversation: ReturnType<typeof createConversationController>;
+  health: ReactNode;
+}) {
+  const snapshot = useSyncExternalStore(
+    conversation.subscribeActivity,
+    conversation.getActivitySnapshot,
+  );
+  return (
+    <ActivityPane
+      controls={snapshot.controls}
+      activity={snapshot.activity}
+      controlBusy={snapshot.controlBusy}
+      health={health}
+      onModelChange={(modelId) =>
+        void conversation.setModel(modelId, snapshot.controls.currentReasoningValue).catch(() => undefined)
+      }
+      onReasoningChange={(value) => {
+        const modelId = snapshot.controls.currentModelId;
+        if (modelId !== null) {
+          void conversation.setModel(modelId, value).catch(() => undefined);
+        }
+      }}
+      onModeChange={(modeId) => void conversation.setMode(modeId).catch(() => undefined)}
+      onConfigChange={(configId, value) =>
+        void conversation.setConfig(configId, value).catch(() => undefined)
+      }
+      onInsertCommand={conversation.insertCommand}
+      onApprovePlan={() => void conversation.reviewPlan("approve").catch(() => undefined)}
+      onRevisePlan={() => void conversation.reviewPlan("revise").catch(() => undefined)}
+    />
+  );
+}
+
+function InteractionHost({
+  conversation,
+  sessions,
+  setup,
+  interactions,
+}: {
+  conversation: ReturnType<typeof createConversationController>;
+  sessions: ReturnType<typeof createSessionController>;
+  setup: ReturnType<typeof createSetupController>;
+  interactions: InteractionController;
+}) {
+  const interactionSnapshot = useSyncExternalStore(
+    conversation.subscribeInteractions,
+    conversation.getInteractionSnapshot,
+  );
+  const sessionState = useSyncExternalStore(sessions.subscribe, sessions.getState);
+  const setupState = useSyncExternalStore(setup.subscribe, setup.getState);
+  const statuses = useSyncExternalStore(interactions.subscribe, interactions.getState);
+  useEffect(() => {
+    interactions.reconcile();
+  }, [interactionSnapshot, interactions, sessionState, setupState]);
+  const current = conversation.getState();
+  const context: InteractionContext = {
+    application: current.application,
+    sessionId: current.sessionId,
+    epoch: current.interactionEpoch,
+    blocked:
+      current.cancelling ||
+      sessionState.opening ||
+      sessionState.closing ||
+      sessionState.creating ||
+      setupState.initializing ||
+      setupState.choosingWorkspace ||
+      current.sessionId !== sessionState.selectedSessionId ||
+      !["ready", "working", "waiting_for_input"].includes(setupState.runtimeState),
+  };
+  return <InteractionPane context={context} controller={interactions} statuses={statuses} />;
+}
+
+function StatusAnnouncer({
+  conversation,
+  readContext,
+  runtimeLabel,
+}: {
+  conversation: ReturnType<typeof createConversationController>;
+  readContext: () => InteractionContext;
+  runtimeLabel: string;
+}) {
+  const composer = useSyncExternalStore(
+    conversation.subscribeComposer,
+    conversation.getComposerSnapshot,
+  );
+  const interactionSnapshot = useSyncExternalStore(
+    conversation.subscribeInteractions,
+    conversation.getInteractionSnapshot,
+  );
+  const pending = interactionSnapshot.needsResync ? 0 : pendingInteractions(readContext()).length;
+  const status =
+    pending > 0
+      ? `${pending} pending request${pending === 1 ? "" : "s"} need review. Approval is never implied by color.`
+      : `Runtime status: ${runtimeLabel}. ${composer.label}`;
+  const [announced, setAnnounced] = useState(status);
+  useEffect(() => {
+    if (pending > 0) {
+      setAnnounced(status);
+      return;
+    }
+    const handle = window.setTimeout(() => setAnnounced(status), STATUS_ANNOUNCE_DELAY_MS);
+    return () => window.clearTimeout(handle);
+  }, [pending, status]);
+  return (
+    <div className="sr-only" aria-live="polite" aria-atomic="true">
+      {announced}
     </div>
   );
 }

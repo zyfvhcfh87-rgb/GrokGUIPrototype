@@ -1,6 +1,7 @@
 import type { FormEvent, KeyboardEvent, ReactNode } from "react";
 
 import type {
+  ComposerPresentation,
   ConversationCard,
   ConversationPresentation,
 } from "../application/conversation.ts";
@@ -8,25 +9,66 @@ import { MarkdownView } from "./MarkdownView.tsx";
 
 export function ConversationPane({
   presentation,
-  draft,
-  onDraftChange,
-  onSend,
-  onCancel,
   onRecover,
   onOpenUrl,
   interactions,
+  composer,
 }: {
   presentation: ConversationPresentation;
-  draft: string;
-  onDraftChange: (value: string) => void;
-  onSend: () => void;
-  onCancel: () => void;
   onRecover: () => void;
   onOpenUrl: (href: string) => void;
   interactions?: ReactNode;
+  composer: ReactNode;
 }) {
-  const { composer } = presentation;
+  return (
+    <section className="conversation" aria-labelledby="conversation-heading">
+      <header className="conversation__header">
+        <p className="shell-panel__eyebrow">Conversation</p>
+        <h1 id="conversation-heading">{presentation.heading}</h1>
+        <p>{presentation.detail}</p>
+        {presentation.canRecover ? (
+          <button className="button button--primary" type="button" onClick={onRecover}>
+            Recover
+          </button>
+        ) : null}
+      </header>
 
+      {interactions}
+
+      <div className="conversation__transcript">
+        {presentation.kind === "empty" || presentation.kind === "no_session" ? (
+          <div className="empty-list">
+            <span className="empty-list__icon" aria-hidden="true">
+              ⌁
+            </span>
+            <p>{presentation.heading}</p>
+            <span>{presentation.detail}</span>
+          </div>
+        ) : (
+          presentation.cards.map((card) => (
+            <ConversationCardView key={card.id} card={card} onOpenUrl={onOpenUrl} />
+          ))
+        )}
+      </div>
+
+      {composer}
+    </section>
+  );
+}
+
+export function ConversationComposer({
+  draft,
+  composer,
+  onDraftChange,
+  onSend,
+  onCancel,
+}: {
+  draft: string;
+  composer: ComposerPresentation;
+  onDraftChange: (value: string) => void;
+  onSend: () => void;
+  onCancel: () => void;
+}) {
   const submit = (event: FormEvent) => {
     event.preventDefault();
     if (composer.canSend) {
@@ -44,68 +86,37 @@ export function ConversationPane({
   };
 
   return (
-    <section className="conversation" aria-labelledby="conversation-heading">
-      <header className="conversation__header">
-        <p className="shell-panel__eyebrow">Conversation</p>
-        <h1 id="conversation-heading">{presentation.heading}</h1>
-        <p>{presentation.detail}</p>
-        {presentation.canRecover ? (
-          <button className="button button--primary" type="button" onClick={onRecover}>
-            Recover
+    <form className="composer" onSubmit={submit}>
+      <div className="composer__meta">
+        <span className={`composer__state composer__state--${composer.kind}`}>
+          {composer.label}
+        </span>
+        <span>{composer.detail}</span>
+      </div>
+      <label className="composer__label" htmlFor="conversation-composer">
+        Prompt
+      </label>
+      <textarea
+        id="conversation-composer"
+        value={draft}
+        disabled={!composer.draftEnabled}
+        placeholder={
+          composer.draftEnabled ? "Write a prompt. Enter sends, Shift+Enter adds a line." : ""
+        }
+        onChange={(event) => onDraftChange(event.target.value)}
+        onKeyDown={onComposerKey}
+      />
+      <div className="composer__actions">
+        {composer.canCancel ? (
+          <button className="button" type="button" onClick={onCancel}>
+            Cancel
           </button>
         ) : null}
-      </header>
-
-      {interactions}
-
-      <div className="conversation__transcript" aria-live="polite">
-        {presentation.kind === "empty" || presentation.kind === "no_session" ? (
-          <div className="empty-list">
-            <span className="empty-list__icon" aria-hidden="true">
-              ⌁
-            </span>
-            <p>{presentation.heading}</p>
-            <span>{presentation.detail}</span>
-          </div>
-        ) : (
-          presentation.cards.map((card) => (
-            <ConversationCardView key={card.id} card={card} onOpenUrl={onOpenUrl} />
-          ))
-        )}
+        <button className="button button--primary" type="submit" disabled={!composer.canSend}>
+          Send
+        </button>
       </div>
-
-      <form className="composer" onSubmit={submit}>
-        <div className="composer__meta">
-          <span className={`composer__state composer__state--${composer.kind}`}>
-            {composer.label}
-          </span>
-          <span>{composer.detail}</span>
-        </div>
-        <label className="composer__label" htmlFor="conversation-composer">
-          Prompt
-        </label>
-        <textarea
-          id="conversation-composer"
-          value={draft}
-          disabled={!composer.draftEnabled}
-          placeholder={
-            composer.draftEnabled ? "Write a prompt. Enter sends, Shift+Enter adds a line." : ""
-          }
-          onChange={(event) => onDraftChange(event.target.value)}
-          onKeyDown={onComposerKey}
-        />
-        <div className="composer__actions">
-          {composer.canCancel ? (
-            <button className="button" type="button" onClick={onCancel}>
-              Cancel
-            </button>
-          ) : null}
-          <button className="button button--primary" type="submit" disabled={!composer.canSend}>
-            Send
-          </button>
-        </div>
-      </form>
-    </section>
+    </form>
   );
 }
 

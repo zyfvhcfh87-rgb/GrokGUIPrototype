@@ -106,6 +106,75 @@ async function readyController(overrides = {}) {
   return { controller, harness };
 }
 
+test("draft keystrokes stay outside the transcript subscription", async () => {
+  const { controller } = await readyController();
+  let transcripts = 0;
+  let drafts = 0;
+  let activity = 0;
+  controller.subscribeTranscript(() => {
+    transcripts += 1;
+  });
+  controller.subscribeDraft(() => {
+    drafts += 1;
+  });
+  controller.subscribeActivity(() => {
+    activity += 1;
+  });
+
+  controller.setDraft("h");
+  controller.setDraft("he");
+
+  assert.equal(drafts, 2);
+  assert.equal(transcripts, 0);
+  assert.equal(activity, 0);
+  assert.equal(controller.getState().draft, "he");
+});
+
+test("assistant chunks update the transcript without refreshing activity controls", async () => {
+  const { controller, harness } = await readyController();
+  let transcripts = 0;
+  let activity = 0;
+  controller.subscribeTranscript(() => {
+    transcripts += 1;
+  });
+  controller.subscribeActivity(() => {
+    activity += 1;
+  });
+  harness.emit({
+    generation: 1,
+    sequence: 1,
+    event: { type: "session_activated", sessionId: "session-1" },
+  });
+  const activityAfterActivation = activity;
+  const transcriptsAfterActivation = transcripts;
+  harness.emit({
+    generation: 1,
+    sequence: 2,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "Hel",
+      truncated: false,
+    },
+  });
+  harness.emit({
+    generation: 1,
+    sequence: 3,
+    event: {
+      type: "message_chunk_received",
+      sessionId: "session-1",
+      messageId: "assistant-1",
+      text: "lo",
+      truncated: false,
+    },
+  });
+
+  assert.equal(transcripts, transcriptsAfterActivation + 2);
+  assert.equal(activity, activityAfterActivation);
+  assert.equal(controller.presentation().cards.at(-1).text, "Hello");
+});
+
 test("sendPrompt streams through the reviewed command and keeps an optimistic user card", async () => {
   const { controller, harness } = await readyController();
   controller.setDraft("hello");

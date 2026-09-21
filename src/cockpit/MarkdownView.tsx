@@ -1,27 +1,35 @@
-import type { KeyboardEvent, MouseEvent, ReactNode } from "react";
+import { memo, useMemo, useRef, type KeyboardEvent, type MouseEvent, type ReactNode } from "react";
 
 import type { MarkdownBlock, MarkdownInline } from "../application/markdown.ts";
 import { parseMarkdown } from "../application/markdown.ts";
 
-export function MarkdownView({
+function MarkdownViewInner({
   text,
   onOpenUrl,
 }: {
   text: string;
   onOpenUrl: (href: string) => void;
 }) {
+  const onOpenUrlRef = useRef(onOpenUrl);
+  onOpenUrlRef.current = onOpenUrl;
+  const blocks = useMemo(() => parseMarkdown(text), [text]);
+  const openUrl = (href: string) => {
+    onOpenUrlRef.current(href);
+  };
   return (
     <div className="markdown">
-      {parseMarkdown(text).map((block, index) => (
+      {blocks.map((block, index) => (
         <MarkdownBlockView
           key={`${block.type}-${index}`}
           block={block}
-          onOpenUrl={onOpenUrl}
+          onOpenUrl={openUrl}
         />
       ))}
     </div>
   );
 }
+
+export const MarkdownView = memo(MarkdownViewInner, (previous, next) => previous.text === next.text);
 
 function MarkdownBlockView({
   block,

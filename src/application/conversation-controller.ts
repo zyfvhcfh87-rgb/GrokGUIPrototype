@@ -20,7 +20,10 @@ import type {
 import {
   conversationFromApplication,
   projectConversation,
+  type ActivityPresentation,
+  type ComposerPresentation,
   type ConversationPresentation,
+  type SessionControlPresentation,
 } from "./conversation.ts";
 import {
   formatPlanCommand,
@@ -28,9 +31,12 @@ import {
   type PlanReviewAction,
 } from "./plan-review.ts";
 import {
+  createApplicationStore,
   initialApplicationState,
-  reduceApplicationEvent,
+  streamChunkText,
   type ApplicationState,
+  type ApplicationStore,
+  type SessionViewState,
   type StreamChunk,
 } from "./state.ts";
 
@@ -83,48 +89,191 @@ const INITIAL_STATE: ConversationControllerState = {
   interactionEpoch: 0,
 };
 
-export function createConversationController(bridge: ConversationControllerBridge) {
-  let state = INITIAL_STATE;
+const EMPTY_PERMISSIONS: SessionViewState["permissions"] = {};
+const EMPTY_ELICITATIONS: SessionViewState["elicitations"] = {};
+
+export type ActivitySnapshot = {
+  controls: SessionControlPresentation;
+  activity: ActivityPresentation;
+  controlBusy: boolean;
+};
+
+export type InteractionSnapshot = {
+  epoch: number;
+  cancelling: boolean;
+  sessionId: string | null;
+  runtimeState: RuntimeState;
+  needsResync: boolean;
+  pendingEventCount: number;
+  runtimeElicitations: SessionViewState["elicitations"];
+  permissions: SessionViewState["permissions"];
+  elicitations: SessionViewState["elicitations"];
+  sessionState: SessionViewState["state"] | null;
+};
+
+export function createConversationController(
+  bridge: ConversationControllerBridge,
+  applicationStore?: ApplicationStore,
+) {
+  const store = applicationStore ?? createApplicationStore();
+  let state: ConversationControllerState = {
+    ...INITIAL_STATE,
+    application: store.getState(),
+  };
   let unlisten: Unlisten | null = null;
   let lifecycle = 0;
   let pendingSerial = 0;
   const listeners = new Set<(state: ConversationControllerState) => void>();
+  const draftListeners = new Set<() => void>();
+  const transcriptListeners = new Set<() => void>();
+  const composerListeners = new Set<() => void>();
+  const activityListeners = new Set<() => void>();
+  const interactionListeners = new Set<() => void>();
+  let transcriptSnapshot = projectCurrent();
+  let composerSnapshot = transcriptSnapshot.composer;
+  let activitySnapshot = activityFrom(transcriptSnapshot, null);
+  let interactionSnapshot = deriveInteraction();
+
+  const notify = (group: Set<() => void>) => {
+    for (const listener of group) {
+      listener();
+    }
+  };
+
+  function projectCurrent(): ConversationPresentation {
+    return projectConversation({
+      sessionId: state.sessionId,
+      session: state.session,
+      sessionView: conversationFromApplication(state.application, state.sessionId),
+      capabilities: state.capabilities,
+      runtimeState: state.runtimeState,
+      modelCatalog: state.modelCatalog,
+      currentModeId: state.currentModeId,
+      configOptions: state.configOptions,
+      pendingUserMessages: state.pendingUserMessages,
+      sending: state.sending,
+      cancelling: state.cancelling,
+      failure: state.failure,
+      needsResync: state.application.needsResync,
+      runtimeFailure: state.application.runtime.failure,
+    });
+  }
+
+  function activityFrom(
+    presentation: ConversationPresentation,
+    sessionView: SessionViewState | null,
+  ): ActivitySnapshot & {
+    toolCalls: SessionViewState["toolCalls"] | undefined;
+    plan: SessionViewState["plan"] | undefined;
+    commands: SessionViewState["availableCommands"] | undefined;
+    planRevision: number;
+    canSend: boolean;
+    catalog: ConversationControllerState["modelCatalog"];
+    modeId: string | null;
+    options: ConversationControllerState["configOptions"];
+    capabilities: ConversationControllerState["capabilities"];
+    session: ConversationControllerState["session"];
+  } {
+    return {
+      controls: presentation.controls,
+      activity: presentation.activity,
+      controlBusy: state.controlBusy,
+      toolCalls: sessionView?.toolCalls,
+      plan: sessionView?.plan,
+      commands: sessionView?.availableCommands,
+      planRevision: sessionView?.planRevision ?? 0,
+      canSend: presentation.composer.canSend,
+      catalog: state.modelCatalog,
+      modeId: state.currentModeId,
+      options: state.configOptions,
+      capabilities: state.capabilities,
+      session: state.session,
+    };
+  }
+
+  function deriveInteraction(): InteractionSnapshot {
+    const session =
+      state.sessionId === null ? undefined : state.application.sessions[state.sessionId];
+    return {
+      epoch: state.interactionEpoch,
+      cancelling: state.cancelling,
+      sessionId: state.sessionId,
+      runtimeState: state.runtimeState,
+      needsResync: state.application.needsResync,
+      pendingEventCount: state.application.pendingEventCount,
+      runtimeElicitations: state.application.runtime.elicitations,
+      permissions: session?.permissions ?? EMPTY_PERMISSIONS,
+      elicitations: session?.elicitations ?? EMPTY_ELICITATIONS,
+      sessionState: session?.state ?? null,
+    };
+  }
+
+  const refreshDerived = () => {
+    const sessionView = conversationFromApplication(state.application, state.sessionId);
+    const nextTranscript = projectCurrent();
+    const transcriptChanged =
+      transcriptSnapshot.cards !== nextTranscript.cards ||
+      transcriptSnapshot.kind !== nextTranscript.kind ||
+      transcriptSnapshot.heading !== nextTranscript.heading ||
+      transcriptSnapshot.detail !== nextTranscript.detail ||
+      transcriptSnapshot.canRecover !== nextTranscript.canRecover ||
+      transcriptSnapshot.failure !== nextTranscript.failure ||
+      transcriptSnapshot.sessionState !== nextTranscript.sessionState;
+    if (transcriptChanged) {
+      transcriptSnapshot = nextTranscript;
+    }
+    if (!composerEqual(composerSnapshot, nextTranscript.composer)) {
+      composerSnapshot = nextTranscript.composer;
+      notify(composerListeners);
+    }
+    const previousActivity = activitySnapshot;
+    const activityUnchanged =
+      previousActivity.controlBusy === state.controlBusy &&
+      previousActivity.toolCalls === sessionView?.toolCalls &&
+      previousActivity.plan === sessionView?.plan &&
+      previousActivity.commands === sessionView?.availableCommands &&
+      previousActivity.planRevision === (sessionView?.planRevision ?? 0) &&
+      previousActivity.canSend === nextTranscript.composer.canSend &&
+      previousActivity.catalog === state.modelCatalog &&
+      previousActivity.modeId === state.currentModeId &&
+      previousActivity.options === state.configOptions &&
+      previousActivity.capabilities === state.capabilities &&
+      previousActivity.session === state.session &&
+      previousActivity.activity.usage === (sessionView?.usage ?? null);
+    if (!activityUnchanged) {
+      activitySnapshot = activityFrom(nextTranscript, sessionView);
+      notify(activityListeners);
+    }
+    const nextInteraction = deriveInteraction();
+    if (!interactionEqual(interactionSnapshot, nextInteraction)) {
+      interactionSnapshot = nextInteraction;
+      notify(interactionListeners);
+    }
+    if (transcriptChanged) {
+      notify(transcriptListeners);
+    }
+  };
 
   const publish = (patch: Partial<ConversationControllerState>) => {
+    const previousDraft = state.draft;
+    const draftOnly = Object.keys(patch).every((key) => key === "draft");
     state = { ...state, ...patch };
+    if (state.draft !== previousDraft) {
+      notify(draftListeners);
+    }
+    if (draftOnly) {
+      return;
+    }
+    refreshDerived();
     for (const listener of listeners) {
       listener(state);
     }
   };
 
-  const adoptSnapshot = (snapshot: RuntimeSnapshot) => {
-    const current = state.application;
-    if (snapshot.generation > current.generation) {
-      return {
-        ...initialApplicationState(snapshot.generation),
-        lastSequence: snapshot.lastSequence,
-        runtime: {
-          ...initialApplicationState().runtime,
-          state: snapshot.state,
-        },
-      };
-    }
-    if (
-      snapshot.generation === current.generation &&
-      current.lastSequence === 0 &&
-      current.pendingEventCount === 0
-    ) {
-      return {
-        ...current,
-        lastSequence: snapshot.lastSequence,
-        runtime: { ...current.runtime, state: snapshot.state },
-      };
-    }
-    return current;
-  };
-
   const handleEvent = (envelope: ApplicationEventEnvelope) => {
-    const application = reduceApplicationEvent(state.application, envelope);
+    const previousGeneration = state.application.generation;
+    store.dispatch(envelope);
+    const application = store.getState();
     const event = envelope.event;
     let currentModeId = state.currentModeId;
     let configOptions = state.configOptions;
@@ -137,11 +286,15 @@ export function createConversationController(bridge: ConversationControllerBridg
     }
     if (event.type === "user_message_chunk_received" && event.sessionId === state.sessionId) {
       const view = conversationFromApplication(application, state.sessionId);
-      const texts = new Set(Object.values(view?.messages ?? {}).map((chunk) => chunk.text));
-      pendingUserMessages = pendingUserMessages.filter((chunk) => !texts.has(chunk.text));
+      const texts = new Set(
+        Object.values(view?.messages ?? {}).map((chunk) => streamChunkText(chunk)),
+      );
+      pendingUserMessages = pendingUserMessages.filter(
+        (chunk) => !texts.has(streamChunkText(chunk)),
+      );
     }
     let { cancelling, sending, runtimeState } = state;
-    if (envelope.generation > state.application.generation) {
+    if (envelope.generation > previousGeneration) {
       pendingUserMessages = [];
       runtimeState = application.runtime.state;
       cancelling = false;
@@ -215,7 +368,7 @@ export function createConversationController(bridge: ConversationControllerBridg
     }
     const pending: StreamChunk = {
       id: `local-user:${(pendingSerial += 1)}`,
-      text,
+      parts: [text],
       truncated: false,
     };
     publish({
@@ -253,23 +406,42 @@ export function createConversationController(bridge: ConversationControllerBridg
         listeners.delete(listener);
       };
     },
-    presentation: (): ConversationPresentation =>
-      projectConversation({
-        sessionId: state.sessionId,
-        session: state.session,
-        sessionView: conversationFromApplication(state.application, state.sessionId),
-        capabilities: state.capabilities,
-        runtimeState: state.runtimeState,
-        modelCatalog: state.modelCatalog,
-        currentModeId: state.currentModeId,
-        configOptions: state.configOptions,
-        pendingUserMessages: state.pendingUserMessages,
-        sending: state.sending,
-        cancelling: state.cancelling,
-        failure: state.failure,
-        needsResync: state.application.needsResync,
-        runtimeFailure: state.application.runtime.failure,
-      }),
+    presentation: (): ConversationPresentation => transcriptSnapshot,
+    subscribeDraft: (listener: () => void) => {
+      draftListeners.add(listener);
+      return () => {
+        draftListeners.delete(listener);
+      };
+    },
+    getDraft: () => state.draft,
+    subscribeTranscript: (listener: () => void) => {
+      transcriptListeners.add(listener);
+      return () => {
+        transcriptListeners.delete(listener);
+      };
+    },
+    getTranscriptSnapshot: () => transcriptSnapshot,
+    subscribeComposer: (listener: () => void) => {
+      composerListeners.add(listener);
+      return () => {
+        composerListeners.delete(listener);
+      };
+    },
+    getComposerSnapshot: () => composerSnapshot,
+    subscribeActivity: (listener: () => void) => {
+      activityListeners.add(listener);
+      return () => {
+        activityListeners.delete(listener);
+      };
+    },
+    getActivitySnapshot: () => activitySnapshot,
+    subscribeInteractions: (listener: () => void) => {
+      interactionListeners.add(listener);
+      return () => {
+        interactionListeners.delete(listener);
+      };
+    },
+    getInteractionSnapshot: () => interactionSnapshot,
     initialize: async () => {
       if (unlisten !== null) {
         return;
@@ -289,9 +461,10 @@ export function createConversationController(bridge: ConversationControllerBridg
         if (currentLifecycle !== lifecycle) {
           return;
         }
+        store.adoptAuthoritativeSnapshot(snapshot);
         publish({
-          application: adoptSnapshot(snapshot),
-          runtimeState: snapshot.state,
+          application: store.getState(),
+          runtimeState: store.getState().runtime.state,
           capabilities: snapshot.capabilities,
           modelCatalog: state.session?.models ?? snapshot.capabilities?.models ?? state.modelCatalog,
         });
@@ -477,6 +650,32 @@ export function createConversationController(bridge: ConversationControllerBridg
       listeners.clear();
     },
   } as const;
+}
+
+function composerEqual(left: ComposerPresentation, right: ComposerPresentation): boolean {
+  return (
+    left.kind === right.kind &&
+    left.label === right.label &&
+    left.detail === right.detail &&
+    left.canSend === right.canSend &&
+    left.canCancel === right.canCancel &&
+    left.draftEnabled === right.draftEnabled
+  );
+}
+
+function interactionEqual(left: InteractionSnapshot, right: InteractionSnapshot): boolean {
+  return (
+    left.epoch === right.epoch &&
+    left.cancelling === right.cancelling &&
+    left.sessionId === right.sessionId &&
+    left.runtimeState === right.runtimeState &&
+    left.needsResync === right.needsResync &&
+    left.pendingEventCount === right.pendingEventCount &&
+    left.runtimeElicitations === right.runtimeElicitations &&
+    left.permissions === right.permissions &&
+    left.elicitations === right.elicitations &&
+    left.sessionState === right.sessionState
+  );
 }
 
 function applyModelSelection(

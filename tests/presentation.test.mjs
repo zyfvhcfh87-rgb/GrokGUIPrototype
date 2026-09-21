@@ -5,11 +5,27 @@ import test from "node:test";
 import {
   applyDocumentAppearance,
   clampPanelWidth,
+  createPanelWidthWriter,
   createPresentationController,
   DEFAULT_PRESENTATION_PREFERENCES,
   resolveTheme,
   sanitizePresentationPreferences,
 } from "../src/application/presentation.ts";
+
+test("keyboard width writes collapse into one commit and pointer writes stay immediate", async () => {
+  const commits = [];
+  const writer = createPanelWidthWriter((width) => {
+    commits.push(width);
+  }, 20);
+  writer.writeKeyboard(216);
+  writer.writeKeyboard(232);
+  writer.writePointer(248);
+  writer.writeKeyboard(264);
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  writer.dispose();
+
+  assert.deepEqual(commits, [248, 264]);
+});
 
 test("panel widths stay in a conversation-preserving range", () => {
   assert.equal(clampPanelWidth(12), 200);

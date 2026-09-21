@@ -9,7 +9,7 @@ use grok_runtime::{
     ActivityStatus, ElicitationDecision, ElicitationValue, GrokRuntime, PermissionDecision,
     PermissionKind, RuntimeCommand, RuntimeConfigKind, RuntimeConfigValue, RuntimeEvent,
     RuntimeExtensionUpdate, RuntimePromptStopReason, RuntimeResponse, RuntimeState,
-    RuntimeTestTarget,
+    RuntimeTestTarget, SessionState,
 };
 
 #[tokio::test]
@@ -128,7 +128,7 @@ async fn stop_during_hung_initialize_does_not_wait_for_ready() {
         tokio::spawn(async move { runtime.start().await })
     };
     wait_for_runtime_state(&mut events, RuntimeState::Connecting).await;
-    tokio::time::sleep(Duration::from_millis(50)).await;
+    wait_for_worker(&runtime).await;
     tokio::time::timeout(Duration::from_secs(3), runtime.stop())
         .await
         .expect("stop during hung initialize must remain bounded")
@@ -709,6 +709,7 @@ async fn advertised_session_controls_can_be_changed_and_active_prompts_cancelled
     );
 
     complete_first_fixture_prompt(&runtime, &session.session_id).await;
+    let mut prompt_events = runtime.subscribe();
     let prompt_runtime = runtime.clone();
     let session_id = session.session_id.clone();
     let pending_prompt = tokio::spawn(async move {
@@ -719,7 +720,7 @@ async fn advertised_session_controls_can_be_changed_and_active_prompts_cancelled
             })
             .await
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_session_state(&mut prompt_events, &session.session_id, SessionState::Working).await;
     assert_eq!(
         runtime
             .execute(RuntimeCommand::Cancel {
@@ -1102,7 +1103,7 @@ async fn cancellation_is_idempotent_and_settles_cancelled_without_ready() {
             })
             .await
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_session_state(&mut events, &session.session_id, SessionState::Working).await;
     for _ in 0..2 {
         assert_eq!(
             runtime
@@ -1299,6 +1300,7 @@ async fn cancel_during_hung_turn_settles_cancelled() {
     else {
         panic!("expected a session response");
     };
+    let mut prompt_events = runtime.subscribe();
     let prompt_runtime = runtime.clone();
     let session_id = session.session_id.clone();
     let pending_prompt = tokio::spawn(async move {
@@ -1309,7 +1311,7 @@ async fn cancel_during_hung_turn_settles_cancelled() {
             })
             .await
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_session_state(&mut prompt_events, &session.session_id, SessionState::Working).await;
     assert_eq!(
         runtime
             .execute(RuntimeCommand::Cancel {
@@ -1350,6 +1352,7 @@ async fn close_during_hung_turn_settles_cancelled() {
     else {
         panic!("expected a session response");
     };
+    let mut prompt_events = runtime.subscribe();
     let prompt_runtime = runtime.clone();
     let session_id = session.session_id.clone();
     let pending_prompt = tokio::spawn(async move {
@@ -1360,7 +1363,7 @@ async fn close_during_hung_turn_settles_cancelled() {
             })
             .await
     });
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    wait_for_session_state(&mut prompt_events, &session.session_id, SessionState::Working).await;
     assert_eq!(
         runtime
             .execute(RuntimeCommand::CloseSession {
@@ -1540,17 +1543,55 @@ async fn wait_for_heartbeat(path: &Path, minimum: u64) -> u64 {
 
 async fn wait_for_stable_heartbeat(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let mut previous = wait_for_heartbeat(path, 0).await;
     while Instant::now() < deadline {
-        let before = wait_for_heartbeat(path, 0).await;
-        tokio::time::sleep(Duration::from_millis(250)).await;
-        let after = fs::read_to_string(path)
+        tokio::time::sleep(Duration::from_millis(40)).await;
+        let current = fs::read_to_string(path)
             .ok()
             .and_then(|contents| contents.trim().parse::<u64>().ok());
-        if after == Some(before) {
+        if current == Some(previous) {
             return;
+        }
+        if let Some(value) = current {
+            previous = value;
         }
     }
     panic!("runtime descendant continued after last owner was dropped");
+}
+
+async fn wait_for_worker(runtime: &GrokRuntime) {
+    tokio::time::timeout(Duration::from_secs(2), async {
+        loop {
+            if runtime.health().worker_running {
+                return;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("worker should be running before stop");
+}
+
+async fn wait_for_session_state(
+    events: &mut tokio::sync::broadcast::Receiver<RuntimeEvent>,
+    session_id: &str,
+    expected: SessionState,
+) {
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if let Ok(RuntimeEvent::SessionStateChanged {
+                session_id: id,
+                state,
+            }) = events.recv().await
+                && id == session_id
+                && state == expected
+            {
+                return;
+            }
+        }
+    })
+    .await
+    .unwrap_or_else(|_| panic!("timed out waiting for session state {expected:?}"));
 }
 
 fn fixture_permission_workspace() -> std::path::PathBuf {
