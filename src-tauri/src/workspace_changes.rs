@@ -27,12 +27,7 @@ const MAX_GIT_OUTPUT_BYTES: usize = 256 * 1_024;
 
 const GIT_NULL_CONFIG: &str = if cfg!(windows) { "NUL" } else { "/dev/null" };
 
-const READ_ONLY_STATUS_ARGS: &[&str] = &[
-    "status",
-    "--porcelain=v1",
-    "-z",
-    "--untracked-files=all",
-];
+const READ_ONLY_STATUS_ARGS: &[&str] = &["status", "--porcelain=v1", "-z", "--untracked-files=all"];
 
 pub async fn inspect_workspace_changes(
     path: &Path,
@@ -129,19 +124,20 @@ async fn inspect_canonical_workspace(
         }
         let git_path = diff_paths.get(diff_index).map(String::as_str).unwrap_or("");
         diff_index += 1;
-        let inspection = diffs
-            .by_path
-            .get(git_path)
-            .cloned()
-            .unwrap_or(if diffs.output_truncated {
-                DiffInspection::Text {
-                    text: String::new(),
-                    truncated: true,
-                    omitted_lines: 0,
-                }
-            } else {
-                DiffInspection::Unavailable
-            });
+        let inspection =
+            diffs
+                .by_path
+                .get(git_path)
+                .cloned()
+                .unwrap_or(if diffs.output_truncated {
+                    DiffInspection::Text {
+                        text: String::new(),
+                        truncated: true,
+                        omitted_lines: 0,
+                    }
+                } else {
+                    DiffInspection::Unavailable
+                });
         match inspection {
             DiffInspection::Text {
                 text,
@@ -521,7 +517,9 @@ async fn diffs_for_paths(toplevel: &Path, paths: &[String]) -> BatchedDiffs {
             if binary {
                 by_path.insert(path, DiffInspection::Binary);
             } else if unified_ok && !output_truncated {
-                by_path.entry(path).or_insert_with(DiffInspection::empty_text);
+                by_path
+                    .entry(path)
+                    .or_insert_with(DiffInspection::empty_text);
             }
         }
     }
@@ -580,7 +578,10 @@ fn parse_numstat_z(bytes: &[u8]) -> Vec<(String, bool)> {
 
 fn field_starts_with_stat(bytes: &[u8], cursor: usize) -> bool {
     let rest = &bytes[cursor..];
-    let end = rest.iter().position(|byte| *byte == 0).unwrap_or(rest.len());
+    let end = rest
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(rest.len());
     rest[..end].contains(&b'\t')
 }
 
@@ -629,7 +630,10 @@ fn split_unified_diff(bytes: &[u8]) -> Vec<(String, Vec<u8>)> {
     for (offset, start) in starts.iter().copied().enumerate() {
         let end = starts.get(offset + 1).copied().unwrap_or(bytes.len());
         let section = &bytes[start..end];
-        let header_end = section.iter().position(|byte| *byte == b'\n').unwrap_or(section.len());
+        let header_end = section
+            .iter()
+            .position(|byte| *byte == b'\n')
+            .unwrap_or(section.len());
         let header = String::from_utf8_lossy(&section[..header_end]);
         if let Some(path) = destination_from_diff_header(&header) {
             sections.push((path, section.to_vec()));

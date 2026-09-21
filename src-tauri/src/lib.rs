@@ -126,11 +126,14 @@ impl WorkspaceManager {
                 .unwrap_or_else(std::sync::PoisonError::into_inner);
             store.paths()
         };
-        let probed = tokio::task::spawn_blocking(move || WorkspaceStore::probe_availability(&paths))
-            .await
-            .map_err(|_| {
-                ApplicationErrorDto::from(crate::workspace::WorkspaceError::PreferencesUnavailable)
-            })?;
+        let probed =
+            tokio::task::spawn_blocking(move || WorkspaceStore::probe_availability(&paths))
+                .await
+                .map_err(|_| {
+                    ApplicationErrorDto::from(
+                        crate::workspace::WorkspaceError::PreferencesUnavailable,
+                    )
+                })?;
         let mut store = self
             .store
             .lock()

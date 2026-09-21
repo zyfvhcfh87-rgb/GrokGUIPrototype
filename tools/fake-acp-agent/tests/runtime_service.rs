@@ -720,7 +720,12 @@ async fn advertised_session_controls_can_be_changed_and_active_prompts_cancelled
             })
             .await
     });
-    wait_for_session_state(&mut prompt_events, &session.session_id, SessionState::Working).await;
+    wait_for_session_state(
+        &mut prompt_events,
+        &session.session_id,
+        SessionState::Working,
+    )
+    .await;
     assert_eq!(
         runtime
             .execute(RuntimeCommand::Cancel {
@@ -1311,7 +1316,12 @@ async fn cancel_during_hung_turn_settles_cancelled() {
             })
             .await
     });
-    wait_for_session_state(&mut prompt_events, &session.session_id, SessionState::Working).await;
+    wait_for_session_state(
+        &mut prompt_events,
+        &session.session_id,
+        SessionState::Working,
+    )
+    .await;
     assert_eq!(
         runtime
             .execute(RuntimeCommand::Cancel {
@@ -1363,7 +1373,12 @@ async fn close_during_hung_turn_settles_cancelled() {
             })
             .await
     });
-    wait_for_session_state(&mut prompt_events, &session.session_id, SessionState::Working).await;
+    wait_for_session_state(
+        &mut prompt_events,
+        &session.session_id,
+        SessionState::Working,
+    )
+    .await;
     assert_eq!(
         runtime
             .execute(RuntimeCommand::CloseSession {
